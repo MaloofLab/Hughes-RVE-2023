@@ -1,0 +1,1002 @@
+---
+title: "RVE Manuscript RvB Half-Life Interaction"
+author: "Julin and Cassandra"
+date: "2023-07-23"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+# Background
+
+RVE8 protein degradation was assessed at ZT7 and ZT19 in monochromatic blue, monochromatic red, or constant dark light conditions.     
+
+Stacey suggested comparing the half-life of RVE8 in constant blue vs constant red light at a single time point (ZT7 or ZT19).   
+Probably want to do this in both WT and ztl backgrounds. Should this also be done for RVE4 at ZT5?
+
+Julin thinks this may work better as an interaction model (ZT * light).  That is what is being tried here.
+
+# Summary
+
+  
+
+```{r setup}
+# for graphing
+library(tidyverse)
+library(cowplot)
+theme_set(theme_cowplot())
+
+# for Bayesian analysis 
+library(posterior)
+library(brms)
+```
+
+```{r}
+#setwd("C:/Users/contr/OneDrive - University of California, Davis/Harmer Lab/Manuscripts/RVE/Figures/fig6_protein/")
+
+#setwd("F:/OneDrive - University of California, Davis/Harmer Lab/Manuscripts/RVE/Figures/fig6_protein/")
+```
+
+# RVE8 WT background 
+
+## load and check data
+
+```{r}
+# load data
+rve8 <- read_csv("CHX_RVE8_WT.csv")
+
+# rename columns
+colnames(rve8) <- c("exp", "blot", "label", "time", "zt", "light", "gt", "rep", "target", "abundance", "scaled", "zt_scaled")
+
+# set factors, remove unnecessary columns
+# also add exp_rep column to separate bio reps 
+rve8 <- rve8 %>% 
+  select(-c(blot, label, gt)) %>% 
+  mutate(exp = as_factor(exp),
+         zt = as_factor(zt),
+         light = as_factor(light),
+         target = as_factor(target),
+         exp_rep = as_factor(paste0(exp, "_", rep)))
+
+summary(rve8)
+```
+
+```{r}
+rve8 %>% 
+  ggplot(aes(time, zt_scaled, color = exp_rep)) +
+  geom_point() + 
+  geom_line(aes(linetype = exp_rep)) +
+  scale_y_log10() + 
+  facet_grid(zt ~ light)
+
+rve8 %>% 
+  ggplot(aes(time, scaled, color = exp_rep)) +
+  geom_point() + 
+  geom_line(aes(linetype = exp_rep)) +
+  scale_y_log10() + 
+  facet_grid(zt ~ light)
+```
+make a plot with just red vs blue:
+
+```{r}
+rve8 %>% 
+  filter(light != "DD", zt=="19") %>%
+  ggplot(aes(time, zt_scaled, color = light, group=str_c(light,exp_rep))) +
+  scale_color_manual(values=c("60B"="blue", "60R"="red")) +
+  geom_point() + 
+  geom_line() +
+  scale_y_log10()
+```
+
+```{r}
+rve8 %>% 
+  filter(light != "DD", zt=="19") %>%
+  ggplot(aes(time, zt_scaled, color = light)) +
+  scale_color_manual(values=c("60B"="blue", "60R"="red")) +
+  geom_smooth() +
+  scale_y_log10()
+```
+```{r}
+rve8 %>% 
+  filter(light != "DD", zt=="7") %>%
+  ggplot(aes(time, zt_scaled, color = light)) +
+  scale_color_manual(values=c("60B"="blue", "60R"="red")) +
+  geom_smooth() +
+  scale_y_log10()
+```
+
+```{r}
+# set up data subsets for no dark
+
+rve8rb <- rve8 %>% filter(light != "DD") %>%
+  mutate(light=relevel(light, ref="60R"))
+```
+
+## ZT7
+
+### fit and compare models
+
+Use non-linear formula and set priors similar to initial RVE8 analysis.   
+
+```{r}
+# first allow k and intercept to vary by light and zt with random effect per rep 
+m1 <- bf(zt_scaled ~ N0 * exp(-k*time),
+           k + N0 ~ light * zt +  (1|exp_rep),
+           nl = TRUE)
+
+
+# assign priors
+priors1 <- c(prior(normal(1, 0.5), nlpar = "N0", coef = "Intercept"), #prior = 1 because that is how it was scaled
+             prior(normal(0, 0.5), nlpar = "N0"), #uninformative prior for other coefficients
+             prior(normal(0, 2),nlpar = "k"), #uninformative prior for rate intercept and coefficents
+             prior(cauchy(0, 1), class = sigma),
+             prior(cauchy(0, 1), class = sd, nlpar = "N0"),
+             prior(cauchy(0, 1), class = sd, nlpar = "k"))
+
+# fit model 
+fit1 <- brm(formula = m1,
+               prior = priors1,
+               data = rve8rb,
+               cores = 4,
+               iter = 8000,
+               control = list(adapt_delta = 0.95))
+```
+
+```{r}
+# check model 
+summary(fit1)
+
+plot(fit1, ask = FALSE)
+```
+
+Rhat = 1, so parameter space was sampled well. Diagnostic plots look okay.   
+
+```{r}
+# no random effect for N0
+m2 <- bf(zt_scaled ~ N0 * exp(-k*time),
+         k ~ light * zt +  (1|exp_rep),
+         N0 ~ light * zt,
+         nl = TRUE)
+
+
+# assign priors
+priors2 <- c(prior(normal(1, 0.5), nlpar = "N0", coef = "Intercept"), #prior = 1 because that is how it was scaled
+             prior(normal(0, 0.5), nlpar = "N0"), #uninformative prior for other coefficients
+             prior(normal(0, 2),nlpar = "k"), #uninformative prior for rate intercept and coefficents
+             prior(cauchy(0, 1), class = sigma),
+             prior(cauchy(0, 1), class = sd, nlpar = "k"))
+
+# fit model 
+fit2 <- brm(formula = m2,
+               prior = priors2,
+               data = rve8rb,
+               cores = 4,
+               iter = 8000,
+               control = list(adapt_delta = 0.99))
+```
+
+```{r}
+# check model 
+summary(fit2)
+
+plot(fit2, ask = FALSE)
+```
+
+Rhat = 1, plots look okay.    
+
+```{r}
+# no random effect for N0 or k
+m3 <- bf(zt_scaled ~ N0 * exp(-k*time),
+           k + N0 ~ light * zt,
+           nl = TRUE)
+
+
+# assign priors
+priors3 <- c(prior(normal(1, 0.5), nlpar = "N0", coef = "Intercept"), #prior = 1 because that is how it was scaled
+             prior(normal(0, 0.5), nlpar = "N0"), #uninformative prior for other coefficients
+             prior(normal(0, 2),nlpar = "k"), #uninformative prior for rate intercept and coefficents
+             prior(cauchy(0, 1), class = sigma))
+
+# fit model 
+fit3 <- brm(formula = m3,
+               prior = priors3,
+               data = rve8rb,
+               cores = 4,
+               iter = 8000,
+               control = list(adapt_delta = 0.95))
+```
+
+```{r}
+# check model 
+summary(fit3)
+
+plot(fit3, ask = FALSE)
+```
+
+Rhat = 1, plots look okay.   
+
+```{r}
+# no zt effects on N0
+m4 <- bf(zt_scaled ~ N0 * exp(-k*time),
+           k ~ light * zt +  (1|exp_rep),
+           N0 ~ light + (1|exp_rep), 
+           nl = TRUE)
+
+
+# assign priors
+priors4 <- c(prior(normal(1, 0.5), nlpar = "N0", coef = "Intercept"), #prior = 1 because that is how it was scaled
+             prior(normal(0, 0.5), nlpar = "N0"), #uninformative prior for other coefficients
+             prior(normal(0, 2),nlpar = "k"), #uninformative prior for rate intercept and coefficents
+             prior(cauchy(0, 1), class = sigma),
+             prior(cauchy(0, 1), class = sd, nlpar = "N0"),
+             prior(cauchy(0, 1), class = sd, nlpar = "k"))
+
+# fit model 
+fit4 <- brm(formula = m4,
+               prior = priors4,
+               data = rve8rb,
+               cores = 4,
+               iter = 8000,
+               control = list(adapt_delta = 0.99))
+```
+
+```{r}
+summary(fit4)
+plot(fit4, ask=FALSE)
+```
+```{r}
+# no zt effects and no random effects on N0
+m5 <- bf(zt_scaled ~ N0 * exp(-k*time),
+           k ~ light * zt +  (1|exp_rep),
+           N0 ~ light, 
+           nl = TRUE)
+
+
+# assign priors
+priors5 <- c(prior(normal(1, 0.5), nlpar = "N0", coef = "Intercept"), #prior = 1 because that is how it was scaled
+             prior(normal(0, 0.5), nlpar = "N0"), #uninformative prior for other coefficients
+             prior(normal(0, 2),nlpar = "k"), #uninformative prior for rate intercept and coefficents
+             prior(cauchy(0, 1), class = sigma),
+             prior(cauchy(0, 1), class = sd, nlpar = "k"))
+
+# fit model 
+fit5 <- brm(formula = m5,
+               prior = priors5,
+               data = rve8rb,
+               cores = 4,
+               iter = 8000,
+               control = list(adapt_delta = 0.99))
+```
+
+```{r}
+summary(fit5)
+plot(fit5, ask = FALSE)
+```
+
+```{r}
+# no zt or light effects on N0
+m6 <- bf(zt_scaled ~ N0 * exp(-k*time),
+           k ~ light * zt +  (1|exp_rep),
+           N0 ~ 1 + (1|exp_rep), 
+           nl = TRUE)
+
+
+# assign priors
+priors6 <- c(prior(normal(1, 0.5), nlpar = "N0", coef = "Intercept"), #prior = 1 because that is how it was scaled
+             prior(normal(0, 2),nlpar = "k"), #uninformative prior for rate intercept and coefficents
+             prior(cauchy(0, 1), class = sigma),
+             prior(cauchy(0, 1), class = sd, nlpar = "N0"),
+             prior(cauchy(0, 1), class = sd, nlpar = "k"))
+
+# fit model 
+fit6 <- brm(formula = m6,
+               prior = priors6,
+               data = rve8rb,
+               cores = 4,
+               iter = 8000,
+               control = list(adapt_delta = 0.99))
+```
+```{r}
+summary(fit6)
+plot(fit6, ask=FALSE)
+```
+
+```{r}
+# no zt or light effects on N0; no random effects
+m7 <- bf(zt_scaled ~ N0 * exp(-k*time),
+           k ~ light * zt,
+           N0 ~ 1, 
+           nl = TRUE)
+
+
+# assign priors
+priors7 <- c(prior(normal(1, 0.5), nlpar = "N0", coef = "Intercept"), #prior = 1 because that is how it was scaled
+             prior(normal(0, 2),nlpar = "k"), #uninformative prior for rate intercept and coefficents
+             prior(cauchy(0, 1), class = sigma))
+
+# fit model 
+fit7 <- brm(formula = m7,
+               prior = priors7,
+               data = rve8rb,
+               cores = 4,
+               iter = 8000,
+               control = list(adapt_delta = 0.99))
+```
+
+```{r}
+summary(fit7)
+plot(fit7, ask=FALSE)
+```
+
+```{r}
+# compare the  models
+LOO(fit1, fit2, fit3, fit4, fit5, fit6, fit7)
+```
+
+Many are roughly equivalent.  Let's go with model 6
+
+Resample to sample prior, needed for hypothesis testing, below
+```{r}
+fit6 <- update(fit6,    
+               sample_prior = "yes",
+               cores = 4,
+               iter = 8000,
+               control = list(adapt_delta = 0.99) )
+```
+
+```{r}
+summary(fit6)
+plot(fit6, ask=FALSE)
+```
+
+
+### compare deg rate between blue and red light
+
+```{r}
+# is red deg rate significantly different from blue deg rate at zt19?
+hyp1 <- hypothesis(fit6, hypothesis = "k_light60B + k_light60B:zt19 > 0")
+
+hyp1
+
+#plot(hyp1)
+```
+blue is greater than red at ZT19
+
+Rate at ZT 7
+```{r}
+# is red deg rate significantly different from blue deg rate at zt7?
+hyp2 <- hypothesis(fit6, hypothesis = "k_light60B = 0")
+
+hyp2
+
+plot(hyp2)
+```
+
+### calculate half-lives and compare between blue and red at ZT19
+
+```{r}
+# first get coefficients
+coefs <- fixef(fit6)[, "Estimate"]
+
+#for blue
+log(2) / sum(coefs[c("k_Intercept", "k_light60B", "k_zt19", "k_light60B:zt19")])
+
+#for red
+log(2) / sum(coefs[c("k_Intercept", "k_zt19")])
+```
+
+Half-lives are pretty consistent with previous calculations, nice.   
+
+```{r}
+# is red half-life significantly different from blue half-life?
+hyp3 <- hypothesis(fit6, hypothesis = "(log(2) / (k_Intercept + k_zt19)) > (log(2) / (k_Intercept + k_light60B + k_zt19 + k_light60B:zt19))")
+hyp3
+
+plot(hyp3)
+```
+
+Red half-life is significantly lower at ZT19
+
+### calculate half-lives and compare between blue and red at ZT7
+
+```{r}
+# first get coefficients
+coefs <- fixef(fit6)[, "Estimate"]
+
+#for blue
+log(2) / sum(coefs[c("k_Intercept", "k_light60B")])
+
+#for red
+log(2) / sum(coefs[c("k_Intercept")])
+```
+
+```{r}
+# is red half-life significantly different from blue half-life?
+hyp4 <- hypothesis(fit6, hypothesis = "(log(2) / (k_Intercept)) = (log(2) / (k_Intercept + k_light60B))")
+hyp4
+
+plot(hyp4)
+```
+
+Red half-life is not different from blue at ZT7
+
+
+# RVE8 ztl background 
+
+## load and check data
+
+```{r}
+# load data
+ztl <- read_csv("CHX_RVE8_ztl.csv")
+
+# rename columns
+colnames(ztl) <- c("exp", "blot", "label", "time", "zt", "light", "gt", "rep", "target", "abundance", "scaled", "zt_scaled")
+
+# set factors, remove unnecessary columns
+# also add exp_rep column to separate bio reps 
+ztl <- ztl %>% 
+  select(-c(blot, label)) %>% 
+  mutate(exp = as_factor(exp),
+         zt = as_factor(zt),
+         light = as_factor(light),
+         gt = as_factor(gt),
+         target = as_factor(target),
+         exp_rep = as_factor(paste0(exp, "_", rep)))
+
+summary(ztl)
+```
+
+make a plot with just red vs blue:
+
+```{r}
+ztl %>% 
+  filter(light != "DD", zt=="19") %>%
+  ggplot(aes(time, zt_scaled, color = light, group=str_c(light,exp_rep))) +
+  scale_color_manual(values=c("60B"="blue", "60R"="red")) +
+  geom_point() + 
+  geom_line() +
+  scale_y_log10()
+```
+
+```{r}
+ztl %>% 
+  filter(light != "DD", zt=="19") %>%
+  ggplot(aes(time, zt_scaled, color = light)) +
+  scale_color_manual(values=c("60B"="blue", "60R"="red")) +
+  geom_smooth() +
+  scale_y_log10()
+```
+
+```{r}
+ztl %>% 
+  filter(light != "DD", zt=="7") %>%
+  ggplot(aes(time, zt_scaled, color = light, group=str_c(light,exp_rep))) +
+  scale_color_manual(values=c("60B"="blue", "60R"="red")) +
+  geom_point() + 
+  geom_line() +
+  scale_y_log10()
+```
+
+```{r}
+ztl %>% 
+  filter(light != "DD", zt=="7") %>%
+  ggplot(aes(time, zt_scaled, color = light)) +
+  scale_color_manual(values=c("60B"="blue", "60R"="red")) +
+  geom_smooth() +
+  scale_y_log10()
+```
+
+```{r}
+# set up data subsets for no dark
+
+ztlrb <- ztl %>% filter(light != "DD") %>%
+  mutate(light=relevel(light, ref="60R"))
+```
+
+
+### fit and compare models
+
+Use non-linear formula and set priors similar to initial RVE8 analysis.  
+
+Intercept looks to be different in R vs B for ZT7, so need to account for that in the model.
+
+
+```{r}
+# first allow k and intercept to vary by light and zt with random effect per rep 
+m1 <- bf(zt_scaled ~ N0 * exp(-k*time),
+           k + N0 ~ light * zt +  (1|exp_rep),
+           nl = TRUE)
+
+
+# assign priors
+priors1 <- c(prior(normal(1, 0.5), nlpar = "N0", coef = "Intercept"), #prior = 1 because that is how it was scaled
+             prior(normal(0, 0.5), nlpar = "N0"), #uninformative prior for other coefficients
+             prior(normal(0, 2),nlpar = "k"), #uninformative prior for rate intercept and coefficents
+             prior(cauchy(0, 1), class = sigma),
+             prior(cauchy(0, 1), class = sd, nlpar = "N0"),
+             prior(cauchy(0, 1), class = sd, nlpar = "k"))
+
+# fit model 
+fit1ztl <- brm(formula = m1,
+               prior = priors1,
+               data = ztlrb,
+               cores = 4,
+               iter = 8000,
+               control = list(adapt_delta = 0.99))
+```
+
+```{r}
+# check model 
+summary(fit1ztl)
+
+plot(fit1ztl, ask = FALSE)
+```
+
+Rhat = 1, so parameter space was sampled well. Diagnostic plots look okay.  1 Divergent transition. 
+
+```{r}
+# no random effect for N0
+m2 <- bf(zt_scaled ~ N0 * exp(-k*time),
+         k ~ light * zt +  (1|exp_rep),
+         N0 ~ light * zt,
+         nl = TRUE)
+
+
+# assign priors
+priors2 <- c(prior(normal(1, 0.5), nlpar = "N0", coef = "Intercept"), #prior = 1 because that is how it was scaled
+             prior(normal(0, 0.5), nlpar = "N0"), #uninformative prior for other coefficients
+             prior(normal(0, 2),nlpar = "k"), #uninformative prior for rate intercept and coefficents
+             prior(cauchy(0, 1), class = sigma),
+             prior(cauchy(0, 1), class = sd, nlpar = "k"))
+
+# fit model 
+fit2ztl <- brm(formula = m2,
+               prior = priors2,
+               data = ztlrb,
+               cores = 4,
+               iter = 8000,
+               control = list(adapt_delta = 0.99))
+```
+
+```{r}
+# check model 
+summary(fit2ztl)
+
+plot(fit2ztl, ask = FALSE)
+```
+
+Rhat = 1, plots look okay.    
+
+```{r}
+# no random effect for N0 or k
+m3 <- bf(zt_scaled ~ N0 * exp(-k*time),
+           k + N0 ~ light * zt,
+           nl = TRUE)
+
+
+# assign priors
+priors3 <- c(prior(normal(1, 0.5), nlpar = "N0", coef = "Intercept"), #prior = 1 because that is how it was scaled
+             prior(normal(0, 0.5), nlpar = "N0"), #uninformative prior for other coefficients
+             prior(normal(0, 2),nlpar = "k"), #uninformative prior for rate intercept and coefficents
+             prior(cauchy(0, 1), class = sigma))
+
+# fit model 
+fit3ztl <- brm(formula = m3,
+               prior = priors3,
+               data = ztlrb,
+               cores = 4,
+               iter = 8000,
+               control = list(adapt_delta = 0.95))
+```
+
+```{r}
+# check model 
+summary(fit3ztl)
+
+plot(fit3ztl, ask = FALSE)
+```
+
+Rhat = 1, plots look okay.   
+
+```{r}
+# # no zt effects on N0
+# # does not sample well
+# m4 <- bf(zt_scaled ~ N0 * exp(-k*time),
+#            k ~ light * zt +  (1|exp_rep),
+#            N0 ~ light + (1|exp_rep), 
+#            nl = TRUE)
+# 
+# 
+# # assign priors
+# priors4 <- c(prior(normal(1, 0.5), nlpar = "N0", coef = "Intercept"), #prior = 1 because that is how it was scaled
+#              prior(normal(0, 0.5), nlpar = "N0"), #uninformative prior for other coefficients
+#              prior(normal(0, 2),nlpar = "k"), #uninformative prior for rate intercept and coefficents
+#              prior(cauchy(0, 1), class = sigma),
+#              prior(cauchy(0, 1), class = sd, nlpar = "N0"),
+#              prior(cauchy(0, 1), class = sd, nlpar = "k"))
+# 
+# # fit model 
+# fit4ztl <- brm(formula = m4,
+#                prior = priors4,
+#                data = ztlrb,
+#                cores = 4,
+#                iter = 8000,
+#                control = list(adapt_delta = 0.99))
+```
+
+```{r}
+# summary(fit4ztl)
+# plot(fit4ztl, ask=FALSE)
+```
+
+```{r}
+# # no zt effects and no random effects on N0
+## Does not sample well
+# m5 <- bf(zt_scaled ~ N0 * exp(-k*time),
+#            k ~ light * zt +  (1|exp_rep),
+#            N0 ~ light, 
+#            nl = TRUE)
+# 
+# 
+# # assign priors
+# priors5 <- c(prior(normal(1, 0.5), nlpar = "N0", coef = "Intercept"), #prior = 1 because that is how it was scaled
+#              prior(normal(0, 0.5), nlpar = "N0"), #uninformative prior for other coefficients
+#              prior(normal(0, 2),nlpar = "k"), #uninformative prior for rate intercept and coefficents
+#              prior(cauchy(0, 1), class = sigma),
+#              prior(cauchy(0, 1), class = sd, nlpar = "k"))
+# 
+# # fit model 
+# fit5ztl <- brm(formula = m5,
+#                prior = priors5,
+#                data = ztlrb,
+#                cores = 4,
+#                iter = 8000,
+#                control = list(adapt_delta = 0.99))
+```
+
+```{r}
+# summary(fit5ztl)
+# plot(fit5ztl, ask = FALSE)
+```
+
+```{r}
+# no zt or light effects on N0
+m6 <- bf(zt_scaled ~ N0 * exp(-k*time),
+           k ~ light * zt +  (1|exp_rep),
+           N0 ~ 1 + (1|exp_rep), 
+           nl = TRUE)
+
+
+# assign priors
+priors6 <- c(prior(normal(1, 0.5), nlpar = "N0", coef = "Intercept"), #prior = 1 because that is how it was scaled
+             prior(normal(0, 2),nlpar = "k"), #uninformative prior for rate intercept and coefficents
+             prior(cauchy(0, 1), class = sigma),
+             prior(cauchy(0, 1), class = sd, nlpar = "N0"),
+             prior(cauchy(0, 1), class = sd, nlpar = "k"))
+
+# fit model 
+fit6ztl <- brm(formula = m6,
+               prior = priors6,
+               data = ztlrb,
+               cores = 4,
+               iter = 8000,
+               control = list(adapt_delta = 0.99))
+```
+```{r}
+summary(fit6ztl)
+plot(fit6ztl, ask=FALSE)
+```
+
+```{r}
+# no zt or light effects on N0; no random effects
+m7 <- bf(zt_scaled ~ N0 * exp(-k*time),
+           k ~ light * zt,
+           N0 ~ 1, 
+           nl = TRUE)
+
+
+# assign priors
+priors7 <- c(prior(normal(1, 0.5), nlpar = "N0", coef = "Intercept"), #prior = 1 because that is how it was scaled
+             prior(normal(0, 2),nlpar = "k"), #uninformative prior for rate intercept and coefficents
+             prior(cauchy(0, 1), class = sigma))
+
+# fit model 
+fit7ztl <- brm(formula = m7,
+               prior = priors7,
+               data = ztlrb,
+               cores = 4,
+               iter = 8000,
+               control = list(adapt_delta = 0.99))
+```
+
+```{r}
+summary(fit7ztl)
+plot(fit7ztl, ask=FALSE)
+```
+
+#4 and 5 do not sample well, so not including them.
+```{r}
+# compare the  models
+LOO(fit1ztl, fit2ztl, fit3ztl, fit6ztl, fit7ztl)
+```
+
+I want to use a model with an interaction for N0, so let's go with 3
+
+Resample to sample prior, needed for hypothesis testing, below
+```{r}
+fit3ztl <- update(fit3ztl,    
+               sample_prior = "yes",
+               cores = 4,
+               iter = 8000,
+               control = list(adapt_delta = 0.99) )
+```
+
+```{r}
+summary(fit3ztl)
+plot(fit3ztl, ask=FALSE)
+```
+
+
+
+### compare deg rate between blue and red light
+
+```{r}
+# is red deg rate significantly different from blue deg rate at zt19?
+hyp1 <- hypothesis(fit3ztl, hypothesis = " k_light60B  + k_light60B:zt19 >  0")
+
+hyp1
+
+#plot(hyp1)
+```
+blue is NOT different from red at ZT19
+
+Rate at ZT 7
+```{r}
+# is red deg rate significantly different from blue deg rate at zt7?
+hyp2 <- hypothesis(fit3ztl, hypothesis = "k_light60B < 0")
+
+hyp2
+
+#plot(hyp2)
+```
+
+Red faster than blue at ZT7
+
+
+### calculate half-lives and compare between blue and red at ZT19
+
+```{r}
+# first get coefficients
+coefs <- fixef(fit3ztl)[, "Estimate"]
+
+#for blue
+log(2) / sum(coefs[c("k_Intercept", "k_light60B", "k_zt19", "k_light60B:zt19")])
+
+#for red
+log(2) / sum(coefs[c("k_Intercept", "k_zt19")])
+```
+
+Half-lives are pretty consistent with previous calculations, nice.   
+
+```{r}
+# is red half-life significantly different from blue half-life?
+hyp3 <- hypothesis(fit3ztl, hypothesis = "(log(2) / (k_Intercept + k_zt19)) > (log(2) / (k_Intercept + k_light60B + k_zt19 + k_light60B:zt19))")
+hyp3
+
+plot(hyp3)
+```
+
+Red half-life is NOT significantly lower at ZT19
+
+### calculate half-lives and compare between blue and red at ZT7
+
+```{r}
+# first get coefficients
+coefs <- fixef(fit3ztl)[, "Estimate"]
+
+#for blue
+log(2) / sum(coefs[c("k_Intercept", "k_light60B")])
+
+#for red
+log(2) / sum(coefs[c("k_Intercept")])
+```
+
+```{r}
+# is red half-life significantly different from blue half-life?
+hyp4 <- hypothesis(fit3ztl, hypothesis = "(log(2) / (k_Intercept)) < (log(2) / (k_Intercept + k_light60B))")
+hyp4
+
+plot(hyp4)
+```
+
+Red half-life IS different from blue at ZT7
+
+# RVE4 
+
+## load and check data 
+
+```{r}
+# load data
+rve4 <- read_csv("CHX_RVE4_WT.csv")
+
+# rename columns
+colnames(rve4) <- c("image", "time", "zt", "light", "gt", "rep", "target", "abundance", "scaled", "zt_scaled", "norm")
+
+# set factors, remove unnecessary columns
+# also add exp_rep column to separate bio reps 
+rve4 <- rve4 %>% 
+  select(-c(image, norm)) %>% 
+  mutate(zt = as_factor(zt),
+         light = as_factor(light),
+         gt = as_factor(gt),
+         rep = as_factor(rep),
+         target = as_factor(target))
+
+summary(rve4)
+```
+
+```{r}
+rve4 %>% 
+  ggplot(aes(time, zt_scaled, color = rep)) +
+  geom_point() + 
+  geom_line(aes(linetype = rep)) +
+  scale_y_log10() + 
+  facet_grid(zt ~ light)
+
+rve4 %>% 
+  ggplot(aes(time, scaled, color = rep)) +
+  geom_point() + 
+  geom_line(aes(linetype = rep)) +
+  scale_y_log10() + 
+  facet_grid(zt ~ light)
+```
+
+```{r}
+rve4 %>% 
+  ggplot(aes(time, zt_scaled, color = rep)) +
+  geom_point() + 
+  geom_line(aes(linetype = rep)) +
+  scale_y_log10() + 
+  facet_grid(zt ~ light)
+
+rve4 %>% 
+  ggplot(aes(time, scaled, color = rep)) +
+  geom_point() + 
+  geom_line(aes(linetype = rep)) +
+  scale_y_log10() + 
+  facet_grid(zt ~ light)
+```
+make a plot with just red vs blue:
+
+```{r}
+rve4 %>% 
+  filter(light != "DD", zt=="17") %>%
+  ggplot(aes(time, zt_scaled, color = light, group=str_c(light,rep))) +
+  scale_color_manual(values=c("60B"="blue", "60R"="red")) +
+  geom_point() + 
+  geom_line() +
+  scale_y_log10()
+```
+
+```{r}
+rve4 %>% 
+  filter(light != "DD", zt=="17") %>%
+  ggplot(aes(time, zt_scaled, color = light)) +
+  scale_color_manual(values=c("60B"="blue", "60R"="red")) +
+  geom_smooth() +
+  scale_y_log10()
+```
+
+
+```{r}
+# set up data subsets for no dark
+
+rve4rb <- rve4 %>% filter(light != "DD") %>%
+  mutate(light=relevel(light, ref="60R"))
+```
+
+with only three reps, drop the random effects...
+
+```{r}
+# no random effect for N0 or k
+m3 <- bf(zt_scaled ~ N0 * exp(-k*time),
+           k + N0 ~ light * zt,
+           nl = TRUE)
+
+
+# assign priors
+priors3 <- c(prior(normal(1, 0.5), nlpar = "N0", coef = "Intercept"), #prior = 1 because that is how it was scaled
+             prior(normal(0, 0.5), nlpar = "N0"), #uninformative prior for other coefficients
+             prior(normal(0, 2),nlpar = "k"), #uninformative prior for rate intercept and coefficents
+             prior(cauchy(0, 1), class = sigma))
+
+# fit model 
+fit3rve4 <- brm(formula = m3,
+               prior = priors3,
+               data = rve4rb,
+               cores = 4,
+               iter = 8000,
+               sample_prior = "yes",
+               control = list(adapt_delta = 0.95))
+```
+
+```{r}
+# check model 
+summary(fit3rve4)
+
+plot(fit3rve4, ask = FALSE)
+```
+
+Rhat = 1, plots look okay.   
+
+### compare deg rate between blue and red light
+
+
+```{r}
+# is red deg rate significantly different from blue deg rate at zt17?
+hyp1 <- hypothesis(fit3rve4, hypothesis = "(k_light60B  + k_light60B:zt17)  = 0")
+
+hyp1
+
+#plot(hyp1)
+```
+
+no difference at ZT17
+
+Rate at ZT 5
+```{r}
+# is red deg rate significantly different from blue deg rate at zt5?
+hyp2 <- hypothesis(fit3rve4, hypothesis = "k_light60B = 0")
+
+hyp2
+
+#plot(hyp2)
+```
+no difference
+
+### calculate half-lives and compare between blue and red at ZT17
+
+```{r}
+# first get coefficients
+coefs <- fixef(fit3rve4)[, "Estimate"]
+
+#for blue
+log(2) / sum(coefs[c("k_Intercept", "k_light60B", "k_zt17", "k_light60B:zt17")])
+
+#for red
+log(2) / sum(coefs[c("k_Intercept", "k_zt17")])
+```
+
+
+```{r}
+# is red half-life significantly different from blue half-life?
+hyp3 <- hypothesis(fit3rve4, hypothesis = "(log(2) / (k_Intercept + k_zt17)) > (log(2) / (k_Intercept + k_light60B + k_zt17 + k_light60B:zt17))")
+hyp3
+
+plot(hyp3)
+```
+
+no difference
+
+### calculate half-lives and compare between blue and red at ZT5
+
+```{r}
+# first get coefficients
+coefs <- fixef(fit3rve4)[, "Estimate"]
+
+#for blue
+log(2) / sum(coefs[c("k_Intercept", "k_light60B")])
+
+#for red
+log(2) / sum(coefs[c("k_Intercept")])
+```
+
+```{r}
+# is red half-life significantly different from blue half-life?
+hyp4 <- hypothesis(fit3rve4, hypothesis = "(log(2) / (k_Intercept)) = (log(2) / (k_Intercept + k_light60B))")
+hyp4
+
+#plot(hyp4)
+```
+
+no difference 

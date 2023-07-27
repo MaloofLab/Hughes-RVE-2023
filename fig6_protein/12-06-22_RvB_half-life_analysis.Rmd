@@ -1,0 +1,842 @@
+---
+title: "RVE Manuscript RvB Half-Life"
+author: "Cassandra"
+date: "2022-11-18"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+# Background
+
+RVE8 protein degradation was assessed at ZT7 and ZT19 in monochromatic blue, monochromatic red, or constant dark light conditions.     
+
+Stacey suggested comparing the half-life of RVE8 in constant blue vs constant red light at a single time point (ZT7 or ZT19).   
+Probably want to do this in both WT and ztl backgrounds. Should this also be done for RVE4 at ZT5?
+
+# Summary
+
+For RVE8 in WT background, there is no significant difference in half-life (or deg rate) between constant blue and constant red light conditions.     
+For RVE8 in *ztl* background, there is a significant difference in deg rate (but not half-life) between constant blue and constant red light conditions at ZT7. At ZT19, there is no significant difference in deg rate (or half-life) between red and blue in *ztl* background.     
+For RVE4, there is no significant difference in half-life (or deg rate) between constant blue and constant red light conditions at ZT5.     
+
+```{r setup}
+# for graphing
+library(tidyverse)
+library(cowplot)
+theme_set(theme_cowplot())
+
+# for Bayesian analysis 
+library(posterior)
+library(brms)
+```
+
+```{r}
+#setwd("C:/Users/contr/OneDrive - University of California, Davis/Harmer Lab/Manuscripts/RVE/Figures/fig6_protein/")
+
+#setwd("F:/OneDrive - University of California, Davis/Harmer Lab/Manuscripts/RVE/Figures/fig6_protein/")
+```
+
+# RVE8 WT background 
+
+## load and check data
+
+```{r}
+# load data
+rve8 <- read_csv("CHX_RVE8_WT.csv")
+
+# rename columns
+colnames(rve8) <- c("exp", "blot", "label", "time", "zt", "light", "gt", "rep", "target", "abundance", "scaled", "zt_scaled")
+
+# set factors, remove unnecessary columns
+# also add exp_rep column to separate bio reps 
+rve8 <- rve8 %>% 
+  select(-c(blot, label, gt)) %>% 
+  mutate(exp = as_factor(exp),
+         zt = as_factor(zt),
+         light = as_factor(light),
+         target = as_factor(target),
+         exp_rep = as_factor(paste0(exp, "_", rep)))
+
+summary(rve8)
+```
+
+```{r}
+rve8 %>% 
+  ggplot(aes(time, zt_scaled, color = exp_rep)) +
+  geom_point() + 
+  geom_line(aes(linetype = exp_rep)) +
+  scale_y_log10() + 
+  facet_grid(zt ~ light)
+
+rve8 %>% 
+  ggplot(aes(time, scaled, color = exp_rep)) +
+  geom_point() + 
+  geom_line(aes(linetype = exp_rep)) +
+  scale_y_log10() + 
+  facet_grid(zt ~ light)
+```
+make a plot with just red vs blue:
+
+```{r}
+rve8 %>% 
+  filter(light != "DD", zt=="19") %>%
+  ggplot(aes(time, zt_scaled, color = light, group=str_c(light,exp_rep))) +
+  scale_color_manual(values=c("60B"="blue", "60R"="red")) +
+  geom_point() + 
+  geom_line() +
+  scale_y_log10()
+```
+
+```{r}
+rve8 %>% 
+  filter(light != "DD", zt=="19") %>%
+  ggplot(aes(time, zt_scaled, color = light)) +
+  scale_color_manual(values=c("60B"="blue", "60R"="red")) +
+  geom_smooth() +
+  scale_y_log10()
+```
+
+
+```{r}
+# set up data subsets for each zt with red and blue data 
+zt7 <- rve8 %>% filter(zt == "7", light != "DD")
+summary(zt7)
+
+zt19 <- rve8 %>% filter(zt == "19", light != "DD")
+summary(zt19)
+```
+
+## ZT7
+
+### fit and compare models
+
+Use non-linear formula and set priors similar to initial RVE8 analysis.   
+
+```{r}
+# first allow k and intercept to vary by light with random effect per rep 
+frm1 <- bf(scaled ~ N0 * exp(-k*time),
+           k + N0 ~ light + (1|exp_rep),
+           nl = TRUE)
+
+# determine protein abundance at time 0 
+N0 <- zt7 %>% filter(time == 0) %>% select(scaled)
+# use mean to set priors
+mean(N0$scaled)
+sd(N0$scaled)
+
+# assign priors
+priors1 <- c(prior(normal(0.94, 0.5), nlpar = "N0", coef = "Intercept"), #prior = mean
+             prior(normal(0, 0.5), nlpar = "N0", coef = "light60R"), #uninformative prior for red being different
+             prior(normal(0, 1),nlpar = "k"), #uninformative prior for rate
+             prior(cauchy(0, 1), class = sigma),
+             prior(cauchy(0, 1), class = sd, nlpar = "N0"),
+             prior(cauchy(0, 1), class = sd, nlpar = "k"))
+
+# fit model 
+fit1zt7 <- brm(formula = frm1,
+               prior = priors1,
+               data = zt7,
+               cores = 4,
+               iter = 8000,
+               control = list(adapt_delta = 0.95))
+```
+
+```{r}
+# check model 
+summary(fit1zt7)
+
+plot(fit1zt7, ask = FALSE)
+```
+
+Rhat = 1, so parameter space was sampled well. Diagnostic plots look okay.   
+
+```{r}
+# no random effect for N0
+frm2 <- bf(scaled ~ N0 * exp(-k*time),
+           k ~ light + (1|exp_rep),
+           N0 ~ light,
+           nl = TRUE)
+
+# similar priors as before 
+priors2 <- c(prior(normal(0.94, 0.5), nlpar = "N0", coef = "Intercept"), #prior = mean
+             prior(normal(0, 0.5), nlpar = "N0", coef = "light60R"), #uninformative prior for red being different
+             prior(normal(0, 1),nlpar = "k"), #uninformative prior for rate
+             prior(cauchy(0, 1), class = sigma),
+             prior(cauchy(0, 1), class = sd, nlpar = "k"))
+
+# fit second model 
+fit2zt7 <- brm(formula = frm2,
+               prior = priors2,
+               data = zt7,
+               cores = 4,
+               iter = 8000,
+               control = list(adapt_delta = 0.99))
+```
+
+```{r}
+# check model 
+summary(fit2zt7)
+
+plot(fit2zt7, ask = FALSE)
+```
+
+Rhat = 1, plots look okay.    
+
+```{r}
+# no random effect for N0 or k
+frm3 <- bf(scaled ~ N0 * exp(-k*time),
+           k + N0 ~ light,
+           nl = TRUE)
+
+# similar priors again
+priors3 <- c(prior(normal(0.94, 0.5), nlpar = "N0", coef = "Intercept"), #prior = mean
+             prior(normal(0, 0.5), nlpar = "N0", coef = "light60R"), #uninformative prior for red being different
+             prior(normal(0, 1),nlpar = "k"), #uninformative prior for rate
+             prior(cauchy(0, 1), class = sigma))
+
+# fit third model 
+fit3zt7 <- brm(formula = frm3,
+               prior = priors3,
+               data = zt7,
+               cores = 4,
+               iter = 8000,
+               sample_prior = "yes",
+               control = list(adapt_delta = 0.9))
+```
+
+```{r}
+# check model 
+summary(fit3zt7)
+
+plot(fit3zt7, ask = FALSE)
+```
+
+Rhat = 1, plots look okay.   
+
+```{r}
+# compare the three models
+LOO(fit1zt7, fit2zt7, fit3zt7)
+```
+
+First model has the best fit, but the three models are comparable.  
+Go with the simple third model.   
+
+### compare deg rate between blue and red light
+
+```{r}
+# is red deg rate significantly different from blue deg rate?
+hyp1 <- hypothesis(fit3zt7, hypothesis = "k_Intercept + k_light60R < k_Intercept")
+hyp1
+
+plot(hyp1)
+
+# check posterior samples of deg rate in red 
+kred <- as_draws_array(fit3zt7, "b_k_light60R")
+summarize_draws(kred)
+mean(kred <= 0) # proportion of posterior samples with k_light60R <= 0
+```
+
+Looks like red deg rate is not significantly different from blue deg rate at ZT7.   
+
+### calculate half-lives and compare between blue and red
+
+```{r}
+# first get coefficients
+coefs <- fixef(fit3zt7)[, "Estimate"]
+
+#for blue
+log(2) / coefs["k_Intercept"]
+
+#for red
+log(2) / sum(coefs["k_Intercept"], coefs["k_light60R"])
+```
+
+Half-lives are pretty consistent with previous calculations, nice.   
+
+```{r}
+# is red half-life significantly different from blue half-life?
+hyp2 <- hypothesis(fit3zt7, hypothesis = "(log(2) / k_Intercept) > (log(2) / (k_Intercept + k_light60R))")
+hyp2
+
+plot(hyp2)
+```
+
+Red half-life is not significantly different from blue half-life with Bayesian confidence interval of 0.05.        
+Consistent with no significant difference in deg rates.    
+
+## ZT19 
+
+### fit and compare models
+
+Set up a few models like with ZT7 data. Can just update models with new data.            
+
+```{r}
+# update fit1 model 
+fit1zt19 <- update(fit1zt7, newdata = zt19,
+                   cores = 4,
+                   iter = 8000,
+                   sample_prior = "yes",
+                   control = list(adapt_delta = 0.99))
+```
+
+```{r}
+# check model 
+summary(fit1zt19)
+
+plot(fit1zt19, ask = FALSE)
+```
+
+Rhat = 1, so parameter space was sampled well. Diagnostic plots look okay.   
+
+```{r}
+# update fit2 model
+fit2zt19 <- update(fit2zt7, newdata = zt19,
+                   cores = 4,
+                   iter = 8000,
+                   sample_prior = "yes",
+                   control = list(adapt_delta = 0.99))
+```
+
+```{r}
+# check model 
+summary(fit2zt19)
+
+plot(fit2zt19, ask = FALSE)
+```
+
+Rhat = 1, plots look okay.    
+
+```{r}
+# update fit3 model
+fit3zt19 <- update(fit3zt7, newdata = zt19,
+                   cores = 4,
+                   iter = 8000,
+                   sample_prior = "yes",
+                   control = list(adapt_delta = 0.99))
+```
+
+```{r}
+# check model 
+summary(fit3zt19)
+
+plot(fit3zt19, ask = FALSE)
+```
+
+Rhat = 1, plots look okay.   
+
+```{r}
+# compare the three models
+LOO(fit1zt19, fit2zt19, fit3zt19)
+```
+
+First model has the best fit but all models still seem comparable?    
+Go with simple third model.    
+
+### compare deg rate between blue and red
+
+```{r}
+# is red deg rate significantly different from blue deg rate at ZT19?
+hyp1 <- hypothesis(fit3zt19, hypothesis = "k_Intercept + k_light60R < k_Intercept")
+hyp1
+
+plot(hyp1)
+
+# check posterior samples of deg rate in red 
+kred <- as_draws_array(fit3zt19, "b_k_light60R")
+summarize_draws(kred)
+mean(kred <= 0) # proportion of posterior samples with k_light60R <= 0
+```
+
+At ZT19, red deg rate is not significantly different from blue deg rate.   
+
+### calculate half-lives and compare between blue and red
+
+```{r}
+# first get coefficients
+coefs <- fixef(fit3zt19)[, "Estimate"]
+
+#for blue
+log(2) / coefs["k_Intercept"]
+
+#for red
+log(2) / sum(coefs["k_Intercept"], coefs["k_light60R"])
+```
+
+Half-lives are again consistent with previous calculations.    
+
+```{r}
+# is red half-life significantly different from blue half-life?
+hyp2 <- hypothesis(fit3zt19, hypothesis = "(log(2) / k_Intercept) > (log(2) / (k_Intercept + k_light60R))")
+hyp2
+
+plot(hyp2)
+```
+
+At ZT19, red half-life is not significantly different from blue half-life with Bayesian confidence interval of 0.05.        
+Consistent with no significant difference in deg rates.    
+
+# RVE8 ztl background 
+
+## load and check data
+
+```{r}
+# load data
+ztl <- read_csv("CHX_RVE8_ztl.csv")
+
+# rename columns
+colnames(ztl) <- c("exp", "blot", "label", "time", "zt", "light", "gt", "rep", "target", "abundance", "scaled", "zt_scaled")
+
+# set factors, remove unnecessary columns
+# also add exp_rep column to separate bio reps 
+ztl <- ztl %>% 
+  select(-c(blot, label)) %>% 
+  mutate(exp = as_factor(exp),
+         zt = as_factor(zt),
+         light = as_factor(light),
+         gt = as_factor(gt),
+         target = as_factor(target),
+         exp_rep = as_factor(paste0(exp, "_", rep)))
+
+summary(ztl)
+```
+
+```{r}
+ztl %>% 
+  ggplot(aes(time, zt_scaled, color = exp_rep)) +
+  geom_point() + 
+  geom_line(aes(linetype = exp_rep)) +
+  scale_y_log10() + 
+  facet_grid(zt ~ light)
+
+ztl %>% 
+  ggplot(aes(time, scaled, color = exp_rep)) +
+  geom_point() + 
+  geom_line(aes(linetype = exp_rep)) +
+  scale_y_log10() + 
+  facet_grid(zt ~ light)
+```
+
+```{r}
+# set up data subsets for each zt with red and blue data 
+ztl7 <- ztl %>% filter(zt == "7", light != "DD")
+summary(ztl7)
+
+ztl19 <- ztl %>% filter(zt == "19", light != "DD")
+summary(ztl19)
+```
+
+## ZT7
+
+### fit and compare models
+
+Use non-linear formula and set priors similar to initial RVE8 analysis.   
+
+```{r}
+# update fit1 model 
+fit1ztl7 <- update(fit1zt7, newdata = ztl7,
+                   cores = 4,
+                   sample_prior = "yes",
+                   control = list(adapt_delta = 0.99))
+```
+
+```{r}
+# check model 
+summary(fit1ztl7)
+
+plot(fit1ztl7, ask = FALSE)
+```
+
+Rhat = 1, so parameter space was sampled well. Diagnostic plots look okay.   
+
+```{r}
+# update fit2 model
+fit2ztl7 <- update(fit2zt7, newdata = ztl7,
+                   cores = 4,
+                   sample_prior = "yes",
+                   control = list(adapt_delta = 0.99))
+```
+
+```{r}
+# check model 
+summary(fit2ztl7)
+
+plot(fit2ztl7, ask = FALSE)
+```
+
+Rhat = 1, plots look okay.    
+
+```{r}
+# update fit3 model
+fit3ztl7 <- update(fit3zt7, newdata = ztl7,
+                   cores = 4,
+                   sample_prior = "yes",
+                   control = list(adapt_delta = 0.99))
+```
+
+```{r}
+# check model 
+summary(fit3ztl7)
+
+plot(fit3ztl7, ask = FALSE)
+```
+
+Rhat = 1, plots look okay.   
+
+```{r}
+# compare the three models
+LOO(fit1ztl7, fit2ztl7, fit3ztl7)
+```
+
+Third model has the best fit, so go with that.    
+
+### compare deg rate between blue and red light
+
+```{r}
+# is red deg rate significantly different from blue deg rate?
+hyp1 <- hypothesis(fit3ztl7, hypothesis = "k_Intercept + k_light60R > k_Intercept")
+hyp1
+
+plot(hyp1)
+
+# check posterior samples of deg rate in red 
+kred <- as_draws_array(fit3ztl7, "b_k_light60R")
+summarize_draws(kred)
+mean(kred <= 0) # proportion of posterior samples with k_light60R <= 0
+```
+
+Looks like red deg rate is significantly different from blue deg rate at ZT7 in *ztl* background.   
+
+### calculate half-lives and compare between blue and red
+
+```{r}
+# first get coefficients
+coefs <- fixef(fit3ztl7)[, "Estimate"]
+
+#for blue
+log(2) / coefs["k_Intercept"]
+
+#for red
+log(2) / sum(coefs["k_Intercept"], coefs["k_light60R"])
+```
+
+Blue half-life is a bit different, but relatively close to previous calculation.     
+
+```{r}
+# is red half-life significantly different from blue half-life?
+hyp2 <- hypothesis(fit3ztl7, hypothesis = "(log(2) / k_Intercept) > (log(2) / (k_Intercept + k_light60R))")
+hyp2
+
+plot(hyp2)
+```
+
+Red half-life is not significantly different from blue half-life with Bayesian confidence interval of 0.05.        
+**Large error here, similar to blue comparison in ztl background.**    
+
+## ZT19 
+
+### fit and compare models
+
+Set up a few models like with ZT7 data. Can just update models with new data.            
+
+```{r}
+# update fit1 model 
+fit1ztl19 <- update(fit1zt7, newdata = ztl19)
+```
+
+```{r}
+# check model 
+summary(fit1ztl19)
+
+plot(fit1ztl19, ask = FALSE)
+```
+
+Rhat = 1, so parameter space was sampled well. Diagnostic plots look okay.   
+
+```{r}
+# update fit2 model
+fit2ztl19 <- update(fit2zt7, newdata = ztl19)
+```
+
+```{r}
+# check model 
+summary(fit2ztl19)
+
+plot(fit2ztl19, ask = FALSE)
+```
+
+Rhat = 1, plots look okay.    
+
+```{r}
+# update fit3 model
+fit3ztl19 <- update(fit3zt7, newdata = ztl19)
+```
+
+```{r}
+# check model 
+summary(fit3ztl19)
+
+plot(fit3ztl19, ask = FALSE)
+```
+
+Rhat = 1, plots look okay.   
+
+```{r}
+# compare the three models
+LOO(fit1ztl19, fit2ztl19, fit3ztl19)
+```
+
+Second model has the best fit but all models still seem comparable?    
+Go with simple third model.    
+
+### compare deg rate between blue and red
+
+```{r}
+# is red deg rate significantly different from blue deg rate at ZT19?
+hyp1 <- hypothesis(fit3ztl19, hypothesis = "k_Intercept + k_light60R < k_Intercept")
+hyp1
+
+plot(hyp1)
+
+# check posterior samples of deg rate in red 
+kred <- as_draws_array(fit3ztl19, "b_k_light60R")
+summarize_draws(kred)
+mean(kred <= 0) # proportion of posterior samples with k_light60R <= 0
+```
+
+At ZT19, red deg rate is not significantly different from blue deg rate in *ztl* background.   
+
+### calculate half-lives and compare between blue and red
+
+```{r}
+# first get coefficients
+coefs <- fixef(fit3ztl19)[, "Estimate"]
+
+#for blue
+log(2) / coefs["k_Intercept"]
+
+#for red
+log(2) / sum(coefs["k_Intercept"], coefs["k_light60R"])
+```
+
+Half-lives are pretty consistent with previous calculations.     
+
+```{r}
+# is red half-life significantly different from blue half-life?
+hyp2 <- hypothesis(fit3ztl19, hypothesis = "(log(2) / k_Intercept) < (log(2) / (k_Intercept + k_light60R))")
+hyp2
+
+plot(hyp2)
+```
+
+At ZT19, red half-life is not significantly different from blue half-life with Bayesian confidence interval of 0.05.        
+Consistent with no significant difference in deg rates.    
+
+# RVE4 
+
+## load and check data 
+
+```{r}
+# load data
+rve4 <- read_csv("CHX_RVE4_WT.csv")
+
+# rename columns
+colnames(rve4) <- c("image", "time", "zt", "light", "gt", "rep", "target", "abundance", "scaled", "zt_scaled", "norm")
+
+# set factors, remove unnecessary columns
+# also add exp_rep column to separate bio reps 
+rve4 <- rve4 %>% 
+  select(-c(image, norm)) %>% 
+  mutate(zt = as_factor(zt),
+         light = as_factor(light),
+         gt = as_factor(gt),
+         rep = as_factor(rep),
+         target = as_factor(target))
+
+summary(rve4)
+```
+
+```{r}
+rve4 %>% 
+  ggplot(aes(time, zt_scaled, color = rep)) +
+  geom_point() + 
+  geom_line(aes(linetype = rep)) +
+  scale_y_log10() + 
+  facet_grid(zt ~ light)
+
+rve4 %>% 
+  ggplot(aes(time, scaled, color = rep)) +
+  geom_point() + 
+  geom_line(aes(linetype = rep)) +
+  scale_y_log10() + 
+  facet_grid(zt ~ light)
+```
+
+```{r}
+# set up data subsets for each zt with red and blue data 
+zt5 <- rve4 %>% filter(zt == "5", light != "DD")
+summary(zt5)
+
+zt17 <- rve4 %>% filter(zt == "17", light != "DD")
+summary(zt17)
+```
+
+## ZT5
+
+### fit and compare models
+
+Use non-linear formula and set priors similar to initial RVE8 analysis.   
+
+```{r}
+# first allow k and intercept to vary by light with random effect per rep 
+frm1 <- bf(scaled ~ N0 * exp(-k*time),
+           k + N0 ~ light + (1|rep),
+           nl = TRUE)
+
+# determine protein abundance at time 0 
+N0 <- zt5 %>% filter(time == 0) %>% select(scaled)
+# use mean to set priors
+mean(N0$scaled)
+sd(N0$scaled)
+
+# assign priors
+priors1 <- c(prior(normal(0.93, 0.5), nlpar = "N0", coef = "Intercept"), #prior = mean
+             prior(normal(0, 0.5), nlpar = "N0", coef = "light60B"), #uninformative prior for blue being different
+             prior(normal(0, 1),nlpar = "k"), #uninformative prior for rate
+             prior(cauchy(0, 1), class = sigma),
+             prior(cauchy(0, 1), class = sd, nlpar = "N0"),
+             prior(cauchy(0, 1), class = sd, nlpar = "k"))
+
+# fit model 
+fit1zt5 <- brm(formula = frm1,
+               prior = priors1,
+               data = zt5,
+               cores = 4,
+               iter = 24000,
+               control = list(adapt_delta = 0.99))
+```
+
+```{r}
+# check model 
+summary(fit1zt5)
+
+plot(fit1zt5, ask = FALSE)
+```
+
+Rhat = 1, so parameter space was sampled well. Diagnostic plots look okay.   
+
+```{r}
+# no random effect for N0
+frm2 <- bf(scaled ~ N0 * exp(-k*time),
+           k ~ light + (1|rep),
+           N0 ~ light,
+           nl = TRUE)
+
+# similar priors as before 
+priors2 <- c(prior(normal(0.93, 0.5), nlpar = "N0", coef = "Intercept"), #prior = mean
+             prior(normal(0, 0.5), nlpar = "N0", coef = "light60B"), #uninformative prior for blue being different
+             prior(normal(0, 1),nlpar = "k"), #uninformative prior for rate
+             prior(cauchy(0, 1), class = sigma),
+             prior(cauchy(0, 1), class = sd, nlpar = "k"))
+
+# fit second model 
+fit2zt5 <- brm(formula = frm2,
+               prior = priors2,
+               data = zt5,
+               cores = 4,
+               iter = 24000,
+               control = list(adapt_delta = 0.99))
+```
+
+```{r}
+# check model 
+summary(fit2zt5)
+
+plot(fit2zt5, ask = FALSE)
+```
+
+Rhat = 1, plots look okay.    
+
+```{r}
+# no random effect for N0 or k
+frm3 <- bf(scaled ~ N0 * exp(-k*time),
+           k + N0 ~ light,
+           nl = TRUE)
+
+# similar priors again
+priors3 <- c(prior(normal(0.93, 0.5), nlpar = "N0", coef = "Intercept"), #prior = mean
+             prior(normal(0, 0.5), nlpar = "N0", coef = "light60B"), #uninformative prior for blue being different
+             prior(normal(0, 1),nlpar = "k"), #uninformative prior for rate
+             prior(cauchy(0, 1), class = sigma))
+
+# fit third model 
+fit3zt5 <- brm(formula = frm3,
+               prior = priors3,
+               data = zt5,
+               cores = 4,
+               iter = 16000,
+               control = list(adapt_delta = 0.9))
+```
+
+```{r}
+# check model 
+summary(fit3zt5)
+
+plot(fit3zt5, ask = FALSE)
+```
+
+Rhat = 1, plots look okay.   
+
+```{r}
+# compare the three models
+LOO(fit1zt5, fit2zt5, fit3zt5)
+```
+
+Third model has the best fit, so go with that.    
+
+### compare deg rate between blue and red light
+
+```{r}
+# is red deg rate significantly different from blue deg rate?
+hyp1 <- hypothesis(fit3zt5, hypothesis = "k_Intercept + k_light60B = k_Intercept")
+hyp1
+
+plot(hyp1)
+
+# check posterior samples of deg rate in blue
+kblue <- as_draws_array(fit3zt5, "b_k_light60B")
+summarize_draws(kblue)
+mean(kblue <= 0) # proportion of posterior samples with k_light60B <= 0
+```
+
+Looks like RVE4 red deg rate is not significantly different from blue deg rate at ZT5.   
+
+### calculate half-lives and compare between blue and red
+
+```{r}
+# first get coefficients
+coefs <- fixef(fit3zt5)[, "Estimate"]
+
+#for red
+log(2) / coefs["k_Intercept"]
+
+#for blue
+log(2) / sum(coefs["k_Intercept"], coefs["k_light60B"])
+```
+
+Half-lives are pretty consistent with previous calculations.     
+
+```{r}
+# is red half-life significantly different from blue half-life?
+hyp2 <- hypothesis(fit3zt5, hypothesis = "(log(2) / k_Intercept) = (log(2) / (k_Intercept + k_light60B))")
+hyp2
+
+plot(hyp2)
+```
+
+Red half-life is not significantly different from blue half-life with Bayesian confidence interval of 0.05.        
+**Large error here, but consistent with no significant difference between deg rates.**    
+
+## ZT17 
+
+Not very useful to examine at ZT17 because half-lives are negative?      

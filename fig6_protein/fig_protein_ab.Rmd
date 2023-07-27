@@ -1,0 +1,294 @@
+---
+title: "RVE Manuscript Protein Abundance"
+author: "Cassandra"
+date: "2022-12-01"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r setup}
+# for graphing
+library(tidyverse)
+library(RColorBrewer)
+library(cowplot)
+theme_set(theme_cowplot())
+# for genotype manipulation
+library(glue)
+library(ggtext)
+# for figure arrangement
+library(gridExtra)
+
+# to check colors for accessibility 
+library(colorBlindness)
+
+#knitr::opts_chunk$set(echo = TRUE, cache = TRUE, autodep = TRUE)
+```
+
+```{r}
+setwd("F:/OneDrive - University of California, Davis/Harmer Lab/Manuscripts/RVE/Figures/fig6_protein/")
+
+#setwd("C:/Users/contr/OneDrive - University of California, Davis/Harmer Lab/Manuscripts/RVE/Figures/fig6_protein/")
+```
+
+```{r}
+# set basic color scale 
+simple_colors <- c("Red" = "darkred", "Blue" = "darkblue")
+simple_light <- c("Dark" = "black", "12:12" = "grey50", "White" = "goldenrod3")
+```
+
+```{r}
+# set basic shapes
+simple_shapes <- c("Red" = 1, "Blue" = 16)
+simple_light_shapes <- c("Dark" = 15, "12:12" = 17, "White" = 0)
+```
+
+# load and format data
+
+```{r}
+# load data
+ab <- read_csv("protein_abundance.csv")
+
+# rename columns
+colnames(ab) <- c("target", "label", "zt", "cond", "rep", "abundance")
+
+# set factors
+ab <- ab %>% mutate(
+  target = as_factor(target),
+  label = as_factor(label),
+  cond = as_factor(cond),
+  rep = as_factor(rep),
+  Light = as_factor(case_when(
+    cond == "60B" ~ "Blue",
+    cond == "60R" ~ "Red", 
+    cond == "DD" ~ "Dark", 
+    cond == "LL" ~ "White", 
+    cond == "LD" ~ "12:12")),
+  graph = as_factor(case_when(
+    cond == "60B" ~ "1",
+    cond == "60R" ~ "1",
+    cond == "DD" ~ "2", 
+    cond == "LL" ~ "2", 
+    cond == "LD" ~ "2")),
+  protein = as_factor(case_when(
+    target == "RVE4" ~ "RVE4-FLAG",
+    target == "RVE8" ~ "RVE8-HA"
+  ))
+)
+
+# order RVE4 and RVE8
+ab$target = as_factor(ab$target) %>% 
+  ordered(levels = c("RVE4", "RVE8"))
+
+summary(ab)
+```
+
+# rep comparison
+
+```{r}
+# RVE8
+ab %>% filter(target == "RVE8") %>% 
+  ggplot(aes(zt, abundance, color = rep)) + 
+  geom_line() +
+  geom_point() + 
+  facet_wrap(~ cond)
+
+# RVE4
+ab %>% filter(target == "RVE4") %>% 
+  ggplot(aes(zt, abundance, color = rep)) + 
+  geom_line() +
+  geom_point() + 
+  facet_wrap(~ cond)
+```
+
+**RVE8 reps are pretty consistent overall. RVE4 is not quite as nice, but generally similar.**     
+
+# calculate averages
+
+```{r}
+avg_ab <- ab %>% group_by(target, cond, Light, graph, protein, zt) %>% 
+  summarise(count = n(),
+            avg_ab = mean(abundance),
+            sd = sd(abundance),
+            sem = sd / sqrt(count))
+
+summary(avg_ab)
+```
+
+# initial graphs
+
+```{r}
+# for blue and red
+avg_ab %>% filter(cond %in% c("60B", "60R")) %>% 
+  ggplot(aes(zt, avg_ab, color = Light, fill = Light)) + 
+  geom_point(aes(shape = Light)) + 
+  geom_line() + 
+  geom_ribbon(aes(ymin = avg_ab - sem,
+                  ymax = avg_ab + sem),
+              linetype = 0, alpha = 0.2) + 
+  facet_wrap(~ target) + 
+  labs(x = "ZT",
+       y = "Relative Protein Abundance") + 
+  scale_color_manual(values = simple_colors) + 
+  scale_fill_manual(values = simple_colors) + 
+  scale_shape_manual(values = simple_shapes)
+```
+
+```{r}
+# for LL, LD, DD
+avg_ab %>% filter(cond %in% c("LL", "LD", "DD")) %>% 
+  ggplot(aes(zt, avg_ab, color = Light, fill = Light)) + 
+  geom_point(aes(shape = Light)) + 
+  geom_line() + 
+  geom_ribbon(aes(ymin = avg_ab - sem,
+                  ymax = avg_ab + sem),
+              linetype = 0, alpha = 0.2) + 
+  facet_wrap(~ target) + 
+  labs(x = "ZT",
+       y = "Relative Protein Abundance") + 
+  scale_color_manual(values = simple_light) + 
+  scale_fill_manual(values = simple_light) + 
+  scale_shape_manual(values = simple_light_shapes)
+```
+
+**Since the collection times were different for RVE4 and RVE8, might want to split graphs by target instead.**    
+
+# for main figure
+
+## assign graphing variables
+
+```{r}
+line_size <- 1
+point_size <- 2
+ribbon_alpha <- 0.25
+facet_label_size = 18
+axis_text_size <- 16
+axis_title_size <- 18
+legend_text_size <- 16
+legend_title_size <- 18
+legend_symbol_size <- unit(2, "line")
+```
+
+## set aesthetic scales
+
+Set color scale for light.   
+
+```{r}
+colors <- c("Blue" = "darkblue", "Red" = "darkred", "Dark" = "black", 
+           "12:12" = "#969696", "White" = "goldenrod3")
+```
+
+Set linetype for light.
+
+```{r}
+lines <- c("Blue" = "solid", "Red" = "solid", "Dark" = "dotted",
+           "12:12" = "solid", "White" = "solid")
+```
+
+Set shapes by color. 
+
+```{r}
+shapes <- c("Red" = 1, "Blue" = 16, "Dark" = 15, "12:12" = 17, "White" = 0)
+```
+
+## graph 
+
+```{r fig.height = 6, fig.width = 6}
+# save to pdf
+#pdf("RVE4_abundance.pdf", width = 6, height = 6, bg = "white")
+
+# for RVE4
+avg_ab %>% filter(target == "RVE4") %>% 
+  ggplot(aes(zt, avg_ab, color = Light, fill = Light)) + 
+  geom_point(aes(shape = Light), size = point_size) + 
+  geom_line(aes(linetype = Light), linewidth = line_size) + 
+  geom_ribbon(aes(ymin = avg_ab - sem,
+                  ymax = avg_ab + sem),
+              linetype = 0, alpha = ribbon_alpha) + 
+  facet_grid(graph ~ protein) + 
+  scale_x_continuous(breaks = seq(0, 48, by = 8)) + 
+  scale_y_continuous(expand = expansion(0, 0),
+                     limits = c(0, 1.05)) + 
+  labs(x = "Time",
+       y = "Scaled Protein Abundance") + 
+  background_grid(major = 'y', minor = "none") + 
+  scale_color_manual(values = colors) + 
+  scale_fill_manual(values = colors) + 
+  scale_shape_manual(values = shapes) + 
+  scale_linetype_manual(values = lines) + 
+  theme(axis.title = element_text(size = axis_title_size),
+        axis.text = element_text(size = axis_text_size),
+        legend.text = element_text(size = legend_text_size),
+        legend.title = element_text(size = legend_title_size),
+        legend.key.size = legend_symbol_size,
+        strip.text.x = element_text(size = facet_label_size),
+        strip.text.y = element_blank())
+
+#dev.off()
+
+# save to pdf
+#pdf("RVE8_abundance.pdf", width = 6, height = 6, bg = "white")
+
+# for RVE8
+avg_ab %>% filter(target == "RVE8") %>% 
+  ggplot(aes(zt, avg_ab, color = Light, fill = Light)) + 
+  geom_point(aes(shape = Light), size = point_size) + 
+  geom_line(aes(linetype = Light), linewidth = line_size) + 
+  geom_ribbon(aes(ymin = avg_ab - sem,
+                  ymax = avg_ab + sem),
+              linetype = 0, alpha = ribbon_alpha) + 
+  facet_grid(graph ~ protein) + 
+  scale_x_continuous(breaks = seq(0, 30, by = 6)) + 
+  scale_y_continuous(expand = expansion(0, 0),
+                     limits = c(0, 1.05)) + 
+  labs(x = "Time",
+       y = "Scaled Protein Abundance") + 
+  background_grid(major = 'y', minor = "none") + 
+  scale_color_manual(values = colors) + 
+  scale_fill_manual(values = colors) + 
+  scale_shape_manual(values = shapes) + 
+  scale_linetype_manual(values = lines) + 
+  theme(axis.title = element_text(size = axis_title_size),
+        axis.text = element_text(size = axis_text_size),
+        legend.text = element_text(size = legend_text_size),
+        legend.title = element_text(size = legend_title_size),
+        legend.key.size = legend_symbol_size,
+        strip.text.x = element_text(size = facet_label_size),
+        strip.text.y = element_blank())
+
+#dev.off()
+```
+
+**Separated RVE4 and RVE8 here because the ZT scales are different.**     
+
+# Color Blindness Test
+
+```{r fig.width = 9, fig.height = 9}
+rve8_graph <- avg_ab %>% filter(target == "RVE8") %>% 
+  ggplot(aes(zt, avg_ab, color = Light, fill = Light)) + 
+  geom_point(aes(shape = Light), size = point_size) + 
+  geom_line(linewidth = line_size) + 
+  geom_ribbon(aes(ymin = avg_ab - sem,
+                  ymax = avg_ab + sem),
+              linetype = 0, alpha = ribbon_alpha) + 
+  facet_grid(graph ~ protein) + 
+  scale_x_continuous(breaks = seq(0, 30, by = 6)) + 
+  scale_y_continuous(expand = expansion(0, 0),
+                     limits = c(0, 1.05)) + 
+  labs(x = "Time",
+       y = "Scaled Protein Abundance") + 
+  background_grid(major = 'y', minor = "none") + 
+  scale_color_manual(values = colors) + 
+  scale_fill_manual(values = colors) + 
+  scale_shape_manual(values = shapes) + 
+  theme(axis.title = element_text(size = axis_title_size),
+        axis.text = element_text(size = axis_text_size),
+        legend.text = element_text(size = legend_text_size),
+        legend.title = element_text(size = legend_title_size),
+        legend.key.size = legend_symbol_size,
+        strip.text.x = element_text(size = facet_label_size),
+        strip.text.y = element_blank())
+
+rve8_graph %>% cvdPlot()
+```

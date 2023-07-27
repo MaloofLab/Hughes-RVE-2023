@@ -1,0 +1,426 @@
+---
+title: "RVE Manuscript RVE4 Half-Life"
+author: "Cassandra"
+date: "2022-11-16"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Background
+
+RVE4 protein degradation was assessed at ZT5 and ZT17 in monochromatic blue, monochromatic red, or constant dark light conditions.  
+
+Julin analyzed the half-life of RVE8 from the initial four bio reps and I am trying to repeat this for RVE4 using Yuyan's experimental results.   
+
+# Summary
+
+In constant blue and red light, RVE4 deg rate (but not half-life) is significantly different between ZT5 and ZT17.    
+In constant darkness, RVE4 half-life (and deg rate) are not significantly different between ZT5 and ZT17.     
+
+```{r setup}
+# for graphing
+library(tidyverse)
+library(cowplot)
+theme_set(theme_cowplot())
+
+# for Bayesian analysis 
+library(posterior)
+library(brms)
+```
+
+```{r}
+#setwd("C:/Users/contr/OneDrive - University of California, Davis/Harmer Lab/Manuscripts/RVE/Figures/fig6_protein/")
+
+setwd("F:/OneDrive - University of California, Davis/Harmer Lab/Manuscripts/RVE/Figures/fig6_protein/")
+```
+
+# RVE4
+
+## load and check data
+
+```{r}
+# load data
+rve4 <- read_csv("CHX_RVE4_WT.csv")
+
+# rename columns
+colnames(rve4) <- c("image", "time", "zt", "light", "gt", "rep", "target", "abundance", "scaled", "zt_scaled", "norm")
+
+# set factors, remove unnecessary columns
+rve4 <- rve4 %>% 
+  select(-c(image, gt, norm)) %>% 
+  mutate(zt = as_factor(zt),
+         light = as_factor(light),
+         rep = as_factor(rep),
+         target = as_factor(target))
+
+summary(rve4)
+```
+
+```{r}
+rve4 %>% 
+  ggplot(aes(time, zt_scaled, color = rep)) +
+  geom_point() + 
+  geom_line(aes(linetype = rep)) +
+  scale_y_log10() + 
+  facet_grid(zt ~ light)
+
+rve4 %>% 
+  ggplot(aes(time, scaled, color = rep)) +
+  geom_point() + 
+  geom_line(aes(linetype = rep)) +
+  scale_y_log10() + 
+  facet_grid(zt ~ light)
+```
+
+```{r}
+# set up data subsets for each light quality
+rve4_blue <- rve4 %>% filter(light == "60B")
+rve4_red <- rve4 %>% filter(light == "60R")
+rve4_dark <- rve4 %>% filter(light == "DD")
+```
+
+## Blue
+
+### fit and compare models
+
+Use similar analysis as for RVE8.       
+**Remember that ZT5 and ZT17 were sampled here.**     
+
+```{r cache = TRUE}
+# first allow k and intercept to vary by ZT with random effect per rep 
+frm1 <- bf(scaled ~ N0 * exp(-k*time),
+           k + N0 ~ zt + (1|rep),
+           nl = TRUE)
+
+# determine protein abundance at time 0 
+N0 <- rve4_blue %>% filter(time == 0) %>% select(scaled)
+# use mean to set priors
+mean(N0$scaled)
+sd(N0$scaled)
+
+# assign priors
+priors1 <- c(prior(normal(0.74, 0.5), nlpar = "N0", coef = "Intercept"), #prior = mean
+             prior(normal(0, 0.5), nlpar = "N0", coef = "zt17"), #uninformative prior for ZT17 being different
+             prior(normal(0, 1),nlpar = "k"), #uninformative prior for rate
+             prior(cauchy(0, 1), class = sigma),
+             prior(cauchy(0, 1), class = sd, nlpar = "N0"),
+             prior(cauchy(0, 1), class = sd, nlpar = "k"))
+
+# fit model 
+rve4_fit1b <- brm(formula = frm1,
+             prior = priors1,
+             data = rve4_blue,
+             cores = 4,
+             iter = 24000,
+             control = list(adapt_delta = 0.99))
+```
+
+```{r}
+# check model 
+summary(rve4_fit1b)
+
+plot(rve4_fit1b, ask = FALSE)
+```
+
+Rhat = 1, so parameter space was sampled well. Diagnostic plots look okay.   
+Not as good as RVE8 though because there are fewer reps?   
+
+```{r cache = TRUE}
+# no random effect for N0
+frm2 <- bf(scaled ~ N0 * exp(-k*time),
+           k ~ zt + (1|rep),
+           N0 ~ zt,
+           nl = TRUE)
+
+# similar priors as before 
+priors2 <- c(prior(normal(0.74, 0.5), nlpar = "N0", coef = "Intercept"), #prior = mean
+             prior(normal(0, 0.5), nlpar = "N0", coef = "zt17"), #uninformative prior for ZT17 being different
+             prior(normal(0, 1),nlpar = "k"), #uninformative prior for rate
+             prior(cauchy(0, 1), class = sigma),
+             prior(cauchy(0, 1), class = sd, nlpar = "k"))
+
+# fit second model 
+rve4_fit2b <- brm(formula = frm2,
+             prior = priors2,
+             data = rve4_blue,
+             cores = 4,
+             iter = 24000,
+             control = list(adapt_delta = 0.99))
+```
+
+```{r}
+# check model 
+summary(rve4_fit2b)
+
+plot(rve4_fit2b, ask = FALSE)
+```
+
+Rhat = 1, plots look okay.    
+
+```{r cache = TRUE}
+# no random effect for N0 or k
+frm3 <- bf(scaled ~ N0 * exp(-k*time),
+           k + N0 ~ zt,
+           nl = TRUE)
+
+# similar priors again
+priors3 <- c(prior(normal(0.74, 0.5), nlpar = "N0", coef = "Intercept"), #prior = mean
+             prior(normal(0, 0.5), nlpar = "N0", coef = "zt17"), #uninformative prior for ZT17 being different
+             prior(normal(0, 1),nlpar = "k"), #uninformative prior for rate
+             prior(cauchy(0, 1), class = sigma))
+
+# fit third model 
+rve4_fit3b <- brm(formula = frm3,
+             prior = priors3,
+             data = rve4_blue,
+             cores = 4,
+             iter = 16000,
+             control = list(adapt_delta = 0.9))
+```
+
+```{r}
+# check model 
+summary(rve4_fit3b)
+
+plot(rve4_fit3b, ask = FALSE)
+```
+
+Rhat = 1, plots look okay.   
+
+```{r}
+# compare the three models
+LOO(rve4_fit1b, rve4_fit2b, rve4_fit3b)
+```
+
+Second model has the best fit, but the three models are comparable?    
+Go with the simple third model.   
+
+### compare deg rate between ZT5 and ZT17
+
+```{r}
+# is ZT17 deg rate significantly different from ZT5 deg rate?
+hyp1 <- hypothesis(rve4_fit3b, hypothesis = "k_Intercept + k_zt17 = k_Intercept")
+hyp1
+
+plot(hyp1)
+
+# check posterior samples of deg rate at ZT19 
+k17 <- as_draws_array(rve4_fit3b, "b_k_zt17")
+summarize_draws(k17)
+mean(k17 <= 0) # proportion of posterior samples with k_zt19 <= 0
+```
+
+Looks like ZT17 deg rate is significantly different from ZT5 deg rate?   
+
+### calculate half-lives and compare between ZT5 and ZT17
+
+```{r}
+# first get coefficients
+coefs <- fixef(rve4_fit3b)[, "Estimate"]
+
+#for ZT5
+log(2) / coefs["k_Intercept"]
+
+#for ZT17
+log(2) / sum(coefs["k_Intercept"], coefs["k_zt17"])
+```
+
+```{r}
+# is ZT17 half-life significantly different from ZT5 half-life?
+hyp2 <- hypothesis(rve4_fit3b, hypothesis = "(log(2) / k_Intercept) = (log(2) / (k_Intercept + k_zt17))")
+hyp2
+
+plot(hyp2)
+```
+
+ZT17 half-life is not significantly different from ZT5 half-life with Bayesian confidence interval of 0.05.        
+**Not consistent with deg rate, but error is also quite large.**        
+
+## Red 
+
+### fit and compare models
+
+```{r cache = TRUE}
+# update fit1b model 
+rve4_fit1r <- update(rve4_fit1b, newdata = rve4_red)
+```
+
+```{r}
+# check model 
+summary(rve4_fit1r)
+
+plot(rve4_fit1r, ask = FALSE)
+```
+
+Rhat = 1, so parameter space was sampled well. Diagnostic plots look okay.   
+
+```{r cache = TRUE}
+# update fit2b model
+rve4_fit2r <- update(rve4_fit2b, newdata = rve4_red)
+```
+
+```{r}
+# check model 
+summary(rve4_fit2r)
+
+plot(rve4_fit2r, ask = FALSE)
+```
+
+Rhat = 1, plots look okay.    
+
+```{r cache = TRUE}
+# update fit3b model
+rve4_fit3r <- update(rve4_fit3b, newdata = rve4_red)
+```
+
+```{r}
+# check model 
+summary(rve4_fit3r)
+
+plot(rve4_fit3r, ask = FALSE)
+```
+
+Rhat = 1, plots look okay.   
+
+```{r}
+# compare the three models
+LOO(rve4_fit1r, rve4_fit2r, rve4_fit3r)
+```
+
+Third model has the best fit, so go with that.    
+
+### compare deg rate between ZT5 and ZT17
+
+```{r}
+# is ZT17 deg rate significantly different from ZT5 deg rate?
+hyp1 <- hypothesis(rve4_fit3r, hypothesis = "k_Intercept + k_zt17 = k_Intercept")
+hyp1
+
+plot(hyp1)
+
+# check posterior samples of deg rate at ZT17 
+k17 <- as_draws_array(rve4_fit3r, "b_k_zt17")
+summarize_draws(k17)
+mean(k17 <= 0) # proportion of posterior samples with k_zt17 <= 0
+```
+
+In constant red light, there is a significant difference between ZT5 and ZT17 deg rate?   
+
+### calculate half-lives and compare between ZT5 and ZT17
+
+```{r}
+# first get coefficients
+coefs <- fixef(rve4_fit3r)[, "Estimate"]
+
+#for ZT5
+log(2) / coefs["k_Intercept"]
+
+#for ZT17
+log(2) / sum(coefs["k_Intercept"], coefs["k_zt17"])
+```
+
+```{r}
+# is ZT17 half-life significantly different from ZT5 half-life?
+hyp2 <- hypothesis(rve4_fit3r, hypothesis = "(log(2) / k_Intercept) = (log(2) / (k_Intercept + k_zt17))")
+hyp2
+
+plot(hyp2)
+```
+
+ZT17 half-life is not significantly different from ZT5 half-life with Bayesian confidence interval of 0.05.        
+**Also not consistent with deg rate, but error is quite large again.**    
+
+## Dark
+
+### fit and compare models
+
+```{r cache = TRUE}
+# update fit1b model  
+rve4_fit1d <- update(rve4_fit1b, newdata = rve4_dark)
+```
+
+```{r}
+# check model 
+summary(rve4_fit1d)
+
+plot(rve4_fit1d, ask = FALSE)
+```
+
+Rhat = 1, so parameter space was sampled well. Diagnostic plots look okay.   
+
+```{r cache = TRUE}
+# update fit2b model
+rve4_fit2d <- update(rve4_fit2b, newdata = rve4_dark)
+```
+
+```{r}
+# check model 
+summary(rve4_fit2d)
+
+plot(rve4_fit2d, ask = FALSE)
+```
+
+Rhat = 1, plots look okay.    
+
+```{r cache = TRUE}
+# update fit3b model
+rve4_fit3d <- update(rve4_fit3b, newdata = rve4_dark)
+```
+
+```{r}
+# check model 
+summary(rve4_fit3d)
+
+plot(rve4_fit3d, ask = FALSE)
+```
+
+Rhat = 1, plots look okay.   
+
+```{r}
+# compare the three models
+LOO(rve4_fit1d, rve4_fit2d, rve4_fit3d)
+```
+
+Second model has the best fit, but all models seem comparable.     
+Go with simple third model.    
+
+### compare deg rate between ZT5 and ZT17
+
+```{r}
+# is ZT17 deg rate significantly different from ZT5 deg rate?
+hyp1 <- hypothesis(rve4_fit3d, hypothesis = "k_Intercept + k_zt17 = k_Intercept")
+hyp1
+
+plot(hyp1)
+
+# check posterior samples of deg rate at ZT17 
+k17 <- as_draws_array(rve4_fit3d, "b_k_zt17")
+summarize_draws(k17)
+mean(k17 <= 0) # proportion of posterior samples with k_zt17 <= 0
+```
+
+In constant darkness, ZT17 deg rate is not significantly different from ZT5 deg rate.   
+
+### calculate half-lives and compare between ZT5 and ZT17
+
+```{r}
+# first get coefficients
+coefs <- fixef(rve4_fit3d)[, "Estimate"]
+
+#for ZT5
+log(2) / coefs["k_Intercept"]
+
+#for ZT17
+log(2) / sum(coefs["k_Intercept"], coefs["k_zt17"])
+```
+
+```{r}
+# is ZT17 half-life significantly different from ZT5 half-life?
+hyp2 <- hypothesis(rve4_fit3d, hypothesis = "(log(2) / k_Intercept) = (log(2) / (k_Intercept + k_zt17))")
+hyp2
+
+plot(hyp2)
+```
+
+ZT17 half-life is not significantly different from ZT5 half-life with Bayesian confidence interval of 0.05.        

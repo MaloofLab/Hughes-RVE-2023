@@ -1,0 +1,659 @@
+---
+title: "RVE Manuscript Protein Half-Life"
+author: "Cassandra"
+date: '2022-11-06'
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup}
+# for graphing
+library(tidyverse)
+library(RColorBrewer)
+library(cowplot)
+theme_set(theme_cowplot())
+# for genotype manipulation
+library(glue)
+library(ggtext)
+# for figure arrangement
+library(gridExtra)
+
+#knitr::opts_chunk$set(echo = TRUE, cache = TRUE, autodep = TRUE)
+```
+
+```{r}
+setwd("F:/OneDrive - University of California, Davis/Harmer Lab/Manuscripts/RVE/Figures/fig6_protein/")
+
+#setwd("C:/Users/contr/OneDrive - University of California, Davis/Harmer Lab/Manuscripts/RVE/Figures/fig6_protein/")
+```
+
+```{r}
+# set basic color scale 
+simple_colors <- c("60R" = "darkred", "60B" = "darkblue", "DD" = "black")
+```
+
+# RVE8
+
+## load and format data 
+
+```{r}
+# load data
+rve8 <- read_csv("CHX_RVE8_WT.csv")
+
+# rename columns
+colnames(rve8) <- c("exp", "blot", "label", "time", "zt", "cond", "gt", "rep", "target", "abundance", "scaled", "zt_scaled")
+
+# remove unnecessary columns and set factors
+# also add column of experiment and rep 
+rve8 <- rve8 %>% 
+  select(-c(blot, label, gt)) %>% 
+  mutate(exp = as_factor(exp),
+         zt = as_factor(zt),
+         cond = as_factor(cond),
+         rep = as_factor(rep),
+         target = as_factor(target),
+         exp_rep = as_factor(paste0(exp, "_", rep)))
+
+summary(rve8)
+```
+
+Just use the scaled ZT values for this, since this is what I had done previously.   
+
+## rep comparison
+
+```{r}
+rve8 %>% 
+  ggplot(aes(time, zt_scaled, color = exp_rep)) +
+  geom_point() + 
+  geom_line(aes(linetype = exp_rep)) +
+  scale_y_log10() + 
+  facet_grid(zt ~ cond)
+```
+
+**Overall, reps seem pretty consistent. CHX 3 is a bit of an outlier for ZT19 60B, especially rep 1.**   
+
+```{r}
+# see what it looks like without CHX 3 for ZT19 60B
+rve8 %>% filter(!(exp == "CHX 3" & zt == "19" & cond == "60B")) %>%
+  ggplot(aes(time, zt_scaled, color = exp_rep)) +
+  geom_point() + 
+  geom_line(aes(linetype = exp_rep)) +
+  scale_y_log10() + 
+  facet_grid(zt ~ cond)
+```
+
+## calculate averages
+
+First try averages for everything. 
+
+```{r}
+rve8_all_avg <- rve8 %>% group_by(target, cond, zt, time) %>% 
+  summarise(count = n(),
+            avg_ab = mean(zt_scaled),
+            sd = sd(zt_scaled),
+            sem = sd / sqrt(count))
+
+summary(rve8_all_avg)
+```
+
+Also calculate average excluding CHX 3 for ZT19 60B. 
+
+```{r}
+most_avg <- rve8 %>% filter(!(exp == "CHX 3" & zt == "19" & cond == "60B")) %>% 
+  group_by(cond, zt, time) %>% 
+  summarise(count = n(),
+            avg_ab = mean(zt_scaled),
+            sd = sd(zt_scaled),
+            sem = sd / sqrt(count))
+
+summary(most_avg)
+```
+
+## initial graph 
+
+With all reps included. 
+
+```{r}
+rve8_all_avg %>% 
+  ggplot(aes(time, avg_ab, color = cond, fill = cond)) + 
+  geom_point() + 
+  geom_line() + 
+  geom_ribbon(aes(ymin = avg_ab - sem,
+              ymax = avg_ab + sem),
+              linetype = 0, alpha = 0.2) +
+  scale_y_log10() + 
+  facet_grid(. ~ zt) +
+  scale_color_manual(values = simple_colors) +
+  scale_fill_manual(values = simple_colors)
+```
+
+Excluding CHX 3 for ZT19 60B. 
+
+```{r}
+most_avg %>% 
+  ggplot(aes(time, avg_ab, color = cond, fill = cond)) + 
+  geom_point() + 
+  geom_line() + 
+  geom_ribbon(aes(ymin = avg_ab - sem,
+              ymax = avg_ab + sem),
+              linetype = 0, alpha = 0.2) +
+  scale_y_log10() + 
+  facet_grid(. ~ zt) + 
+  scale_color_manual(values = simple_colors) +
+  scale_fill_manual(values = simple_colors)
+```
+
+# RVE4
+
+## load and format data 
+
+```{r}
+# load data
+rve4 <- read_csv("CHX_RVE4_WT.csv")
+
+# rename columns
+colnames(rve4) <- c("images", "time", "zt", "cond", "gt", "rep", "target", "abundance", "scaled", "zt_scaled", "norm")
+
+# remove unnecessary columns and set factors
+rve4 <- rve4 %>% 
+  select(-c(images, gt)) %>% 
+  mutate(zt = as_factor(zt),
+         cond = as_factor(cond),
+         rep = as_factor(rep),
+         target = as_factor(target))
+
+summary(rve4)
+```
+
+## using scaled values for each ZT
+
+### rep comparison
+
+```{r}
+rve4 %>% 
+  ggplot(aes(time, zt_scaled, color = rep)) +
+  geom_point() + 
+  geom_line(aes(linetype = rep)) +
+  scale_y_log10() + 
+  facet_grid(zt ~ cond)
+```
+
+**Reps 1 and 2 seem pretty consistent, but rep 3 is off almost across the board. Just remove rep 3?**   
+
+```{r}
+rve4 %>% filter(rep != "3") %>% 
+  ggplot(aes(time, zt_scaled, color = rep)) +
+  geom_point() + 
+  geom_line(aes(linetype = rep)) +
+  scale_y_log10() + 
+  facet_grid(zt ~ cond)
+```
+
+### calculate averages
+
+First try averages for all three reps. 
+
+```{r}
+rve4_all_avg <- rve4 %>% group_by(target, cond, zt, time) %>% 
+  summarise(count = n(),
+            avg_ab = mean(zt_scaled),
+            sd = sd(zt_scaled),
+            sem = sd / sqrt(count))
+
+summary(rve4_all_avg)
+```
+
+Also calculate average for just the first two reps. 
+
+```{r}
+two_avg <- rve4 %>% filter(rep != "3") %>% 
+  group_by(cond, zt, time) %>% 
+  summarise(count = n(),
+            avg_ab = mean(zt_scaled),
+            sd = sd(zt_scaled),
+            sem = sd / sqrt(count))
+
+summary(two_avg)
+```
+
+### initial graph 
+
+With all three reps included. 
+
+```{r}
+rve4_all_avg %>% 
+  ggplot(aes(time, avg_ab, color = cond, fill = cond)) + 
+  geom_point() + 
+  geom_line() + 
+  geom_ribbon(aes(ymin = avg_ab - sem,
+              ymax = avg_ab + sem),
+              linetype = 0, alpha = 0.2) +
+  scale_y_log10(breaks = c(0.1, 0.3, 1), limits = c(0.1, 1)) + 
+  facet_grid(. ~ zt) +
+  scale_color_manual(values = simple_colors) +
+  scale_fill_manual(values = simple_colors)
+```
+
+With just the first two reps included. 
+
+```{r}
+two_avg %>% 
+  ggplot(aes(time, avg_ab, color = cond, fill = cond)) + 
+  geom_point() + 
+  geom_line() + 
+  geom_ribbon(aes(ymin = avg_ab - sem,
+              ymax = avg_ab + sem),
+              linetype = 0, alpha = 0.2) +
+  scale_y_log10() + 
+  facet_grid(. ~ zt) + 
+  scale_color_manual(values = simple_colors) +
+  scale_fill_manual(values = simple_colors)
+```
+
+## using just the relative quantification
+
+### rep comparison
+
+```{r}
+rve4 %>% 
+  ggplot(aes(time, abundance, color = rep)) +
+  geom_point() + 
+  geom_line(aes(linetype = rep)) +
+  scale_y_log10() + 
+  facet_grid(zt ~ cond)
+```
+
+Try removing rep 3 again.    
+
+```{r}
+rve4 %>% filter(rep != "3") %>% 
+  ggplot(aes(time, abundance, color = rep)) +
+  geom_point() + 
+  geom_line(aes(linetype = rep)) +
+  scale_y_log10() + 
+  facet_grid(zt ~ cond)
+```
+
+### calculate averages
+
+First try averages for all three reps. 
+
+```{r}
+all_avg <- rve4 %>% group_by(cond, zt, time) %>% 
+  summarise(count = n(),
+            avg_ab = mean(abundance),
+            sd = sd(abundance),
+            sem = sd / sqrt(count))
+
+summary(all_avg)
+```
+
+Also calculate average for just the first two reps. 
+
+```{r}
+two_avg <- rve4 %>% filter(rep != "3") %>% 
+  group_by(cond, zt, time) %>% 
+  summarise(count = n(),
+            avg_ab = mean(abundance),
+            sd = sd(abundance),
+            sem = sd / sqrt(count))
+
+summary(two_avg)
+```
+
+### initial graph 
+
+With all three reps included. 
+
+```{r}
+all_avg %>% 
+  ggplot(aes(time, avg_ab, color = cond, fill = cond)) + 
+  geom_point() + 
+  geom_line() + 
+  geom_ribbon(aes(ymin = avg_ab - sem,
+              ymax = avg_ab + sem),
+              linetype = 0, alpha = 0.2) +
+  scale_y_log10() + 
+  facet_grid(. ~ zt) + 
+  scale_color_manual(values = simple_colors) +
+  scale_fill_manual(values = simple_colors)
+```
+
+With just the first two reps included. 
+
+```{r}
+two_avg %>% 
+  ggplot(aes(time, avg_ab, color = cond, fill = cond)) + 
+  geom_point() + 
+  geom_line() + 
+  geom_ribbon(aes(ymin = avg_ab - sem,
+              ymax = avg_ab + sem),
+              linetype = 0, alpha = 0.2) +
+  scale_y_log10() + 
+  facet_grid(. ~ zt) + 
+  scale_color_manual(values = simple_colors) +
+  scale_fill_manual(values = simple_colors)
+```
+
+## using normalized abundance
+
+I think this is what Yuyan used for her graphs. 
+
+### rep comparison
+
+Rep 3 wasn't normalized because the normalization sample didn't work.  
+
+```{r}
+rve4 %>% 
+  ggplot(aes(time, norm, color = rep)) +
+  geom_point() + 
+  geom_line(aes(linetype = rep)) +
+  scale_y_log10() + 
+  facet_grid(zt ~ cond)
+```
+
+### calculate averages
+
+Calculate average for just the first two reps. 
+
+```{r}
+two_avg <- rve4 %>% filter(rep != "3") %>% 
+  group_by(cond, zt, time) %>% 
+  summarise(count = n(),
+            avg_ab = mean(norm),
+            sd = sd(norm),
+            sem = sd / sqrt(count))
+
+summary(two_avg)
+```
+
+### initial graph 
+
+With just the first two reps included. 
+
+```{r}
+two_avg %>% 
+  ggplot(aes(time, avg_ab, color = cond, fill = cond)) + 
+  geom_point() + 
+  geom_line() + 
+  geom_ribbon(aes(ymin = avg_ab - sem,
+              ymax = avg_ab + sem),
+              linetype = 0, alpha = 0.2) +
+  scale_y_log10() + 
+  facet_grid(. ~ zt) + 
+  scale_color_manual(values = simple_colors) +
+  scale_fill_manual(values = simple_colors)
+```
+
+Try to match Yuyan's graphs.  
+
+```{r}
+two_avg %>% 
+  ggplot(aes(time, avg_ab, color = cond, fill = cond)) + 
+  geom_point() + 
+  geom_line() + 
+  geom_ribbon(aes(ymin = avg_ab - sem,
+              ymax = avg_ab + sem),
+              linetype = 0, alpha = 0.2) +
+  scale_y_log10(expand = expansion(0, 0), limits = c(0.01, 10)) + 
+  facet_grid(. ~ zt) + 
+  scale_color_manual(values = simple_colors) +
+  scale_fill_manual(values = simple_colors)
+```
+
+# RVE4 and RVE8 combined
+
+```{r}
+head(rve4_all_avg)
+head(rve8_all_avg)
+
+# join RVE4 and RVE8 together
+full_avg <- full_join(rve4_all_avg, rve8_all_avg)
+summary(full_avg)
+```
+
+## initial graphs
+
+```{r}
+full_avg %>% 
+  ggplot(aes(time, avg_ab, color = cond, fill = cond)) + 
+  geom_point() + 
+  geom_line() + 
+  geom_ribbon(aes(ymin = avg_ab - sem,
+              ymax = avg_ab + sem),
+              linetype = 0, alpha = 0.2) +
+  scale_y_log10() + 
+  facet_wrap(target ~ zt) + 
+  scale_color_manual(values = simple_colors) +
+  scale_fill_manual(values = simple_colors)
+```
+
+Probably cleaner to just use `gridExtra` for arranging RVE4 and RVE8 together. 
+
+### ZT arranged next to each other
+
+```{r}
+# first RVE4
+rve4_rough_graph <- full_avg %>% filter(target == "RVE4") %>% 
+  ggplot(aes(time, avg_ab, color = cond, fill = cond)) + 
+  geom_point() + 
+  geom_line() + 
+  geom_ribbon(aes(ymin = avg_ab - sem,
+              ymax = avg_ab + sem),
+              linetype = 0, alpha = 0.2) +
+  scale_y_log10(expand = expansion(0, 0),
+                limits = c(0.1, 1.2)) + 
+  facet_grid(target ~ zt) + 
+  labs(y = "Scaled Protein Abundance",
+       x = "Time After CHX Application (hours)",
+       color = "Light",
+       fill = "Light") + 
+  scale_color_manual(values = simple_colors) +
+  scale_fill_manual(values = simple_colors) + 
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        strip.text.y = element_text(face = "italic"))
+
+# then RVE8
+rve8_rough_graph <- full_avg %>% filter(target == "RVE8") %>% 
+  ggplot(aes(time, avg_ab, color = cond, fill = cond)) + 
+  geom_point() + 
+  geom_line() + 
+  geom_ribbon(aes(ymin = avg_ab - sem,
+              ymax = avg_ab + sem),
+              linetype = 0, alpha = 0.2) +
+  scale_y_log10(expand = expansion(0, 0),
+                limits = c(0.1, 1.2)) + 
+  facet_grid(target ~ zt) + 
+  labs(y = "Scaled Protein Abundance",
+       x = "Time After CHX Application (hours)",
+       color = "Light",
+       fill = "Light") +
+  scale_color_manual(values = simple_colors) +
+  scale_fill_manual(values = simple_colors) +
+  theme(strip.text.y = element_text(face = "italic"))
+
+# extract the legend
+light_legend <- get_legend(rve8_rough_graph)
+```
+
+```{r fig.height = 6, fig.width = 6}
+layout <- rbind(c(1, 1, 1, 1),
+                c(2, 2, 2, 2))
+
+grid.arrange(rve4_rough_graph, rve8_rough_graph,
+             ncol = 1, layout_matrix = layout)
+```
+
+### ZT stacked on top of each other
+
+```{r}
+# first RVE4
+rve4_rough_graph <- full_avg %>% filter(target == "RVE4") %>% 
+  ggplot(aes(time, avg_ab, color = cond, fill = cond)) + 
+  geom_point() + 
+  geom_line() + 
+  geom_ribbon(aes(ymin = avg_ab - sem,
+              ymax = avg_ab + sem),
+              linetype = 0, alpha = 0.2) +
+  scale_y_log10(expand = expansion(0, 0),
+                limits = c(0.1, 1.2)) + 
+  facet_grid(zt ~ target) + 
+  labs(y = "Scaled Protein Abundance",
+       x = "Time After CHX Application (hours)",
+       color = "Light",
+       fill = "Light") + 
+  scale_color_manual(values = simple_colors) +
+  scale_fill_manual(values = simple_colors) + 
+  theme(strip.text.x = element_text(face = "italic"),
+        legend.position = "none")
+
+# then RVE8
+rve8_rough_graph <- full_avg %>% filter(target == "RVE8") %>% 
+  ggplot(aes(time, avg_ab, color = cond, fill = cond)) + 
+  geom_point() + 
+  geom_line() + 
+  geom_ribbon(aes(ymin = avg_ab - sem,
+              ymax = avg_ab + sem),
+              linetype = 0, alpha = 0.2) +
+  scale_y_log10(expand = expansion(0, 0),
+                limits = c(0.1, 1.2)) + 
+  facet_grid(zt ~ target) + 
+  labs(y = "Scaled Protein Abundance",
+       x = "Time After CHX Application (hours)",
+       color = "Light",
+       fill = "Light") +
+  scale_color_manual(values = simple_colors) +
+  scale_fill_manual(values = simple_colors) +
+  theme(axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        strip.text.x = element_text(face = "italic"),
+        legend.position = "none")
+```
+
+```{r fig.height = 4, fig.width = 8}
+layout <- rbind(c(1, 1, 1, 1, 1, 2, 2, 2, 2, 3))
+
+grid.arrange(rve4_rough_graph, rve8_rough_graph, light_legend,
+             ncol = 2, layout_matrix = layout)
+```
+
+Probably just make the two graphs separately and arrange everything together in Affinity. 
+
+# for main figure
+
+## format data
+
+```{r}
+summary(full_avg)
+
+# make light easier to understand 
+full_avg <- full_avg %>% mutate(
+  Light = as_factor(case_when(
+    cond == "60B" ~ "Blue",
+    cond == "60R" ~ "Red", 
+    cond == "DD" ~ "Dark")),
+  protein = as_factor(case_when(
+    target == "RVE4" ~ "RVE4-FLAG",
+    target == "RVE8" ~ "RVE8-HA"
+  ))
+)
+
+# order light as a factor
+full_avg$Light = as_factor(full_avg$Light) %>% 
+  ordered(levels = c("Blue", "Red", "Dark"))
+```
+
+## assign graphing variables
+
+```{r}
+line_size <- 1
+point_size <- 2
+ribbon_alpha <- 0.25
+facet_label_size = 18
+axis_text_size <- 16
+axis_title_size <- 18
+legend_text_size <- 16
+legend_title_size <- 18
+legend_symbol_size <- unit(2, "line")
+```
+
+## set aesthetic scales
+
+Set color scale for light.   
+
+```{r}
+colors <- c("Blue" = "darkblue", "Red" = "darkred", "Dark" = "black")
+```
+
+Set shapes by color. 
+
+```{r}
+shapes <- c("Red" = 1, "Blue" = 16, "Dark" = 15)
+```
+
+## graph 
+
+```{r fig.height = 5, fig.width = 6}
+# save to pdf
+#pdf("RVE4_half-life.pdf", width = 6, height = 5, bg = "white")
+
+# RVE4
+full_avg %>% filter(target == "RVE4") %>% 
+  ggplot(aes(time, avg_ab, color = Light, fill = Light)) + 
+  geom_point(aes(shape = Light), size = point_size) + 
+  geom_line(linewidth = line_size) + 
+  geom_ribbon(aes(ymin = avg_ab - sem,
+              ymax = avg_ab + sem),
+              linetype = 0, alpha = ribbon_alpha) +
+  scale_y_log10(expand = expansion(0, 0),
+                limits = c(0.1, 1.2)) + 
+  facet_grid(zt ~ protein) + 
+  labs(y = "Scaled Protein Abundance",
+       x = "Time After CHX Application (hours)") + 
+  background_grid(major = 'y', minor = "none") + 
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values = colors) + 
+  scale_shape_manual(values = shapes) + 
+  theme(axis.title = element_text(size = axis_title_size),
+        axis.text = element_text(size = axis_text_size),
+        legend.text = element_text(size = legend_text_size),
+        legend.title = element_text(size = legend_title_size),
+        legend.key.size = legend_symbol_size,
+        strip.text.x = element_text(size = facet_label_size),
+        strip.text.y = element_text(size = facet_label_size))
+
+#dev.off()
+
+# save to pdf
+#pdf("RVE8_half-life.pdf", width = 6, height = 5, bg = "white")
+
+# RVE8
+full_avg %>% filter(target == "RVE8") %>% 
+  ggplot(aes(time, avg_ab, color = Light, fill = Light)) + 
+  geom_point(aes(shape = Light), size = point_size) + 
+  geom_line(linewidth = line_size) + 
+  geom_ribbon(aes(ymin = avg_ab - sem,
+              ymax = avg_ab + sem),
+              linetype = 0, alpha = ribbon_alpha) +
+  scale_y_log10(expand = expansion(0, 0),
+                limits = c(0.1, 1.2)) + 
+  facet_grid(zt ~ protein) + 
+  labs(y = "Scaled Protein Abundance",
+       x = "Time After CHX Application (hours)") + 
+  background_grid(major = 'y', minor = "none") + 
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values = colors) + 
+  scale_shape_manual(values = shapes) + 
+  theme(axis.title = element_text(size = axis_title_size),
+        axis.text = element_text(size = axis_text_size),
+        legend.text = element_text(size = legend_text_size),
+        legend.title = element_text(size = legend_title_size),
+        legend.key.size = legend_symbol_size,
+        strip.text.x = element_text(size = facet_label_size),
+        strip.text.y = element_text(size = facet_label_size))
+
+#dev.off()
+```
+
